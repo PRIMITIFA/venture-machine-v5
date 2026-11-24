@@ -148,8 +148,13 @@ class Pipeline(unittest.TestCase):
         self.assertLessEqual(store.spent(slug), 5)
         pipeline.gate(slug, "go")
         self.assertEqual(store.venture(slug)["status"], "approved_build")
-        from vm import report
+        from vm import report, pdf
         self.assertTrue(report.write(slug).exists())
+        h = pdf.build_html(slug)
+        for part in ("FINDINGS REPORT", "The checks, block by block", "Competitors", "Market size", "unit economics", "The plan", "Sources"):
+            self.assertIn(part, h)
+        f, msg = pdf.write(slug)  # a real PDF if a browser is installed, else a clear message
+        self.assertTrue(f is None or f.stat().st_size > 1000, msg)
 
     def test_pivot_resets_phase2_3(self):
         slug = pipeline.new("pivot test idea about stickers", country="gb")

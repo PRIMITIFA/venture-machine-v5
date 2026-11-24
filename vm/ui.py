@@ -5,7 +5,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import pipeline, report, store
+from . import pdf, pipeline, report, store
 from .config import LOCATIONS, S
 from .report import e
 
@@ -22,6 +22,10 @@ def _bg_run(slug):
         store.update_venture(slug, status="alert")
     finally:
         report.write(slug)
+        try:
+            pdf.write(slug)
+        except Exception as ex:
+            lines.append(f"PDF failed: {ex}")
         with LOCK:
             RUNNING.pop(slug, None)
 
@@ -58,7 +62,7 @@ def venture_page(slug):
     v = store.venture(slug)
     if not v:
         return None
-    acts = "<p><a href='/'>&larr; all ideas</a></p>"
+    acts = (f"<p><a href='/'>&larr; all ideas</a> &nbsp; <a href='/pdf/{e(slug)}'><button>Download findings PDF</button></a></p>")
     if slug in RUNNING:
         acts += "<div class=card><b>Running...</b><pre>" + e("\n".join(RUNNING[slug][-30:])) + "</pre></div>"
     else:
@@ -109,6 +113,21 @@ class H(BaseHTTPRequestHandler):
         if path.startswith("/v/"):
             pg = venture_page(path[3:])
             return self.send(200, pg) if pg else self.send(404, "not found")
+        if path.startswith("/pdf/"):
+            slug = path[5:]
+            if not store.venture(slug):
+                return self.send(404, "not found")
+            f, msg = pdf.write(slug)
+            if not f:
+                return self.send(500, report.page("PDF", f"<div class=card>{e(msg)}</div>"))
+            data = f.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", f'attachment; filename="{slug}-findings.pdf"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path.startswith("/files/"):
             slug, _, name = path[7:].partition("/")
             f = (S.ventures_dir / slug / name).resolve()

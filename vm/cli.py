@@ -2,7 +2,7 @@
 import argparse
 import sys
 
-from . import ai, pipeline, report, seo, store
+from . import ai, pdf, pipeline, report, seo, store
 from .config import ROOT, S, load_env
 
 
@@ -54,6 +54,11 @@ def cmd_report(a):
     print(report.write(a.slug))
 
 
+def cmd_pdf(a):
+    f, msg = pdf.write(a.slug)
+    print(f if f else msg)
+
+
 def cmd_doctor(a):
     print(f"data folder : {S.data_dir}")
     print(f"AI provider : {ai.provider()}  (smart={S.model_smart}, fast={S.model_fast})")
@@ -70,6 +75,7 @@ def cmd_doctor(a):
         print("screenshots : playwright installed")
     except ImportError:
         print("screenshots : off (optional: pip install playwright && playwright install chromium)")
+    print(f"PDF         : {'playwright' if 'playwright' in sys.modules else (pdf.find_browser() or 'no browser found: open findings.html and print to PDF')}")
     print(f"house rules : {'house_rules.md' if (ROOT / 'house_rules.md').exists() else 'house_rules.example.md (copy it to house_rules.md and edit)'}")
 
 
@@ -109,6 +115,9 @@ def main(argv=None):
     s = sub.add_parser("report", help="write ventures/<slug>/report.html")
     s.add_argument("slug")
     s.set_defaults(f=cmd_report)
+    s = sub.add_parser("pdf", help="write ventures/<slug>/<slug>-findings.pdf (everything it found out)")
+    s.add_argument("slug")
+    s.set_defaults(f=cmd_pdf)
     sub.add_parser("doctor", help="check keys, balance and setup").set_defaults(f=cmd_doctor)
     s = sub.add_parser("ui", help="local web app on http://127.0.0.1:8765")
     s.add_argument("--port", type=int, default=8765)

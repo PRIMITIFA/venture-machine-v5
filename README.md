@@ -51,6 +51,7 @@ python vm.py doctor
 ```
 
 Optional: competitor screenshots in block 10 need `pip install playwright && playwright install chromium`.
+The findings PDF uses Playwright if it is installed. Otherwise it uses Chrome, Edge or Chromium, which are already on most computers.
 
 ## Use it
 
@@ -76,6 +77,7 @@ python vm.py show <slug>            # block-by-block status
 python vm.py list                   # every idea (killed ones stay, so they are never re-pitched)
 python vm.py rerun <slug> 07        # redo a block and everything after it
 python vm.py report <slug>          # ventures/<slug>/report.html
+python vm.py pdf <slug>             # ventures/<slug>/<slug>-findings.pdf: everything it found out
 ```
 
 ## What you get (in `ventures/<slug>/`)
@@ -87,7 +89,8 @@ python vm.py report <slug>          # ventures/<slug>/report.html
 | 10-13 | `12_competitor_ux.json` (+ `shots/`), `13_competitor_business.json`, `13_competitor_ads.md`, `14_market_analysis.json`, `15_competitor_seo.json`, `15_link_targets.csv` |
 | 15-17 | `GUARDRAILS.md`, `ACCESS.md`, `OWNER-TODO.json`, `16_owner_questions.md`, `16_unit_economics.json`, `18_business_case.md`, `18_swot.md`, `19_business_plan.md`, `19_sitemap.json`, `19_seo_calendar_90d.csv` |
 | gates | `18_gate3_memo.md`, `20_quick_test.md` (if you pick TEST) |
-| all | `report.html`: one page with everything, plus spend per block |
+| all | **`<slug>-findings.pdf`**: the findings report to read or share (made after every run; also the **Download findings PDF** button in the app). It covers the verdict, key numbers, every check, competitors and their prices, the market, links, costs, unit economics, SWOT, the plan, the 90-day calendar and every source used |
+| all | `report.html`: a live status page with spend per block |
 
 The state (blocks, gate decisions, the money ledger and the cache) is kept in `data/vm.sqlite`.
 
