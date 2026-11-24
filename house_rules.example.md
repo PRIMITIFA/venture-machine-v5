@@ -5,7 +5,7 @@ The AI checks every idea against these. An idea that breaks one is flagged in bl
 ## What I will build
 - Digital products only, delivered 100% by software (no human doing the work for each order).
 - Paid products, subscriptions or affiliate income. No ad-funded sites.
-- Price between $10 and $1,000.
+- Any price is fine, low or high, as long as it makes money: a real profit per sale after fees and data costs, and enough sales to matter.
 - Unpopular / boring niches are fine, even better.
 
 ## What I will not do

@@ -44,7 +44,7 @@ def fake_post(endpoint, task):
         base = sorted(DOMAINS, key=lambda d: hash((d, k[:6])) % 97)
         items = [{"type": "organic", "rank_group": i + 1, "domain": d, "url": f"https://{d}/{k[:10].replace(' ', '-')}" if i > 3 else f"https://{d}/",
                   "title": f"{k} tool" if i == 2 else f"{k} guide"} for i, d in enumerate(base)]
-        items += [{"type": "paid", "domain": "comp1.com", "title": "Get your sticker", "description": "From $9"}, {"type": "people_also_ask"},
+        items += [{"type": "paid", "domain": "comp1.com", "title": "Get your sticker", "description": "From $9"}, {"type": "people_also_ask", "items": [{"title": "How do I find my window sticker?"}, {"title": "Is a window sticker free?"}]},
                   {"type": "ai_overview", "items": [{"type": "ai_overview_element", "references": [{"domain": "www.comp2.com", "url": "https://comp2.com"}]}]}]
         return [{"items": items}]
     if endpoint.endswith("bulk_keyword_difficulty/live"):
@@ -59,6 +59,18 @@ def fake_post(endpoint, task):
         return [{"rank": 35, "backlinks": 5000, "referring_domains": 400}]
     if endpoint.endswith("referring_domains/live"):
         return [{"items": [{"domain": f"ref{i}.org", "rank": 60 - i, "backlinks": 3} for i in range(40)]}]
+    if endpoint.endswith("domain_rank_overview/live"):
+        return [{"items": [{"metrics": {"organic": {"etv": 12000, "count": 800, "estimated_paid_traffic_cost": 9000, "pos_1": 5, "pos_2_3": 9}}}]}]
+    if endpoint.endswith("historical_rank_overview/live"):
+        return [{"items": [{"year": 2026, "month": m, "metrics": {"organic": {"etv": 1000 + m * 50}}} for m in range(1, 13)]}]
+    if endpoint.endswith("ranked_keywords/live"):
+        return [{"items": [{"keyword_data": {"keyword": f"window sticker {w}", "keyword_info": {"search_volume": 300, "cpc": 2}, "keyword_properties": {"keyword_difficulty": 12}},
+                            "ranked_serp_element": {"serp_item": {"rank_group": 4}}} for w in ("pdf", "lookup ford", "unrelated")]
+                 + [{"keyword_data": {"keyword": "pizza near me", "keyword_info": {"search_volume": 9000}}, "ranked_serp_element": {"serp_item": {"rank_group": 2}}}]}]
+    if endpoint.endswith("whois/overview/live"):
+        return [{"items": [{"domain": d, "created_datetime": "2020-01-01 00:00:00 +00:00"} for d in task["filters"][0][2]]}]
+    if endpoint.endswith("lighthouse/live/json"):
+        return [{"categories": {"performance": {"score": 0.42}}}]
     if endpoint.endswith("llm_responses/live"):
         return [{"items": [{"type": "message", "sections": [{"type": "text", "text": "Try comp1.com or BestSnap.",
                                                             "annotations": [{"url": "https://comp1.com/x"}, {"url": "https://bestsnap.io/"}]}]}],
@@ -148,7 +160,7 @@ class Pipeline(unittest.TestCase):
         for f in ("01_intake.md", "02_how_analysis.json", "03_eeat_quality.json", "04_niche_pulse.json", "05_scorecard.json",
                   "06_seeds.csv", "08_keywords_clean.csv", "09_serp_raw.json", "10_clusters_serp.json", "11_shortlist.csv",
                   "11_top_competitors.json", "12_competitor_ux.json", "13_competitor_business.json", "13_competitor_ads.md",
-                  "14_market_analysis.json", "15_competitor_seo.json", "15_ai_visibility.json", "15_link_targets.csv", "GUARDRAILS.md", "ACCESS.md",
+                  "14_market_analysis.json", "15_competitor_seo.json", "15_ai_visibility.json", "15_keyword_gap.csv", "15_questions.json", "15_link_targets.csv", "GUARDRAILS.md", "ACCESS.md",
                   "OWNER-TODO.json", "16_owner_questions.md", "18_business_case.md", "18_swot.md", "19_business_plan.md",
                   "19_sitemap.json", "19_seo_calendar_90d.csv"):
             self.assertTrue((TMP / "ventures" / slug / f).exists(), f)
@@ -229,6 +241,12 @@ class Pure(unittest.TestCase):
         self.assertEqual(k, "photoaid.com|uk photo")
         self.assertTrue(seo.not_competitor("passport.service.gov.uk"))
         self.assertFalse(seo.not_competitor("photoaid.com"))
+
+    def test_on_topic(self):
+        from vm.blocks.phase3 import on_topic
+        ph = [{"passport", "photo"}, {"visa", "photo"}]
+        self.assertTrue(on_topic("uk passport photo app", ph))
+        self.assertFalse(on_topic("renew british passport", ph))
 
     def test_economics(self):
         e = phase4.economics(price=20, data_cost=2, fee_pct=5, fee_fixed=0.4, conversion_pct=2, retention_months=3, cpc=1.0)

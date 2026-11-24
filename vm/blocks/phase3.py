@@ -28,6 +28,10 @@ def b10_ux(c):
     shots_dir = c.path("shots")
     shots_dir.mkdir(exist_ok=True)
     facts, images, manual = [], [], []
+    try:
+        ages = seo.domain_ages([x["domain"] for x in comps])
+    except seo.DFSError:
+        ages = {}
     for x in comps:
         d = x["domain"]
         p = web.fetch(d)
@@ -38,7 +42,11 @@ def b10_ux(c):
         images += shots[:2]
         if web.blocked(p):
             manual.append(d)
-        facts.append({"domain": d, "status": p["status"], "load_ms": p["ms"], "kb": p["bytes"] // 1024, "title": web.title_of(p["html"]),
+        try:
+            speed = seo.speed_score(p["url"] if p["status"] == 200 else d)
+        except seo.DFSError:
+            speed = None
+        facts.append({"domain": d, "mobile_speed_score": speed, "domain_created": ages.get(d, ""), "status": p["status"], "load_ms": p["ms"], "kb": p["bytes"] // 1024, "title": web.title_of(p["html"]),
                       "trust": sig["trust"], "checkout_provider": sig["checkout"], "mobile_viewport": sig["mobile_viewport"],
                       "pricing_page": pricing, "sitemap_urls": sm["urls"], "sitemap_oldest": sm["oldest"], "sitemap_newest": sm["newest"],
                       "blocked_or_captcha": d in manual, "screenshots": shots, "text": web.text_of(p["html"], 2500)})
@@ -167,6 +175,27 @@ def b12_market(c):
     biz = c.read("13_competitor_business.json")
     short = read_csv(c.path("11_shortlist.csv"))
     tr = seo.traffic([x["domain"] for x in comps], c.loc, c.lang)
+    rival_traffic = {}
+    for x in comps:
+        try:
+            rival_traffic[x["domain"]] = seo.rank_overview(x["domain"], c.loc, c.lang)
+        except seo.DFSError as ex:
+            rival_traffic[x["domain"]] = {"error": str(ex)[:150]}
+    history, trends = {}, []
+    by_visits = sorted(comps, key=lambda x: -num((rival_traffic.get(x["domain"]) or {}).get("visits")))
+    for x in by_visits[:3]:
+        try:
+            h = seo.traffic_history(x["domain"], c.loc, c.lang)
+        except seo.DFSError:
+            continue
+        history[x["domain"]] = h
+        if len(h) >= 6:
+            first = sum(r["visits"] for r in h[:3]) / 3
+            last = sum(r["visits"] for r in h[-3:]) / 3
+            if first:
+                trends.append(round((last - first) / first * 100, 1))
+                rival_traffic[x["domain"]]["trend_12m_pct"] = trends[-1]
+    rivals_trend = round(sum(trends) / len(trends), 1) if trends else None
     heads = [r["keyword"] for r in short if r["role"] == "main"][:5]
     by_country = {}
     for cc in S.market_countries:
@@ -185,7 +214,8 @@ def b12_market(c):
 2) Typical price from the competitor pricing data.
 3) Buyer segments with real pain quotes (Trustpilot, app stores, Reddit, forums) and URLs; mark underserved ones.
 4) Countries/segments that are underserved; growth direction with evidence.{c.note()}""",
-        Market, web=True, smart=True, context={"competitor_pricing": biz["competitors"], "search_volume_by_country_main_keywords": by_country})
+        Market, web=True, smart=True, context={"competitor_pricing": biz["competitors"], "search_volume_by_country_main_keywords": by_country,
+                                               "rivals_google_traffic_now_and_12m_trend": rival_traffic})
     conv = S.assumed_conversion
     # niche clicks: what the top-5 results get from OUR buying keywords (volume x organic CTR of positions 1-5)
     kws = read_csv(c.path("08_keywords_clean.csv"))
@@ -199,7 +229,9 @@ def b12_market(c):
     goal = S.year1_goal_usd
     d = {"bottom_up_usd_year": round(bottom_up),
          "bottom_up_method": f"buying searches/mo x top-5 CTR {CTR_TOP5:.0%} = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) x ${price:.2f} ({price_src}) x 12",
-         "competitor_domain_traffic": tr, "search_volume_by_country": by_country, "year1_goal_usd": goal, **out.model_dump()}
+         "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_traffic_history": history,
+         "rivals_traffic_trend_12m_pct": rivals_trend,
+         "search_volume_by_country": by_country, "year1_goal_usd": goal, **out.model_dump()}
     d["typical_price_usd"] = price
     big, small = max(bottom_up, out.top_down_usd_year), min(bottom_up, out.top_down_usd_year)
     d["methods_differ_10x"] = bool(small and big / small > 10)
@@ -240,13 +272,17 @@ def b13_links(c):
     targets.sort(key=lambda t: (-t["links_to_n"], -t["dr"]))
     write_csv(c.path("15_link_targets.csv"), targets, ["domain", "dr", "links_to_n", "competitors"])
     c.write("15_competitor_seo.json", {"competitors": seo_rows})
+    gap = keyword_gap(c, comps)
+    write_csv(c.path("15_keyword_gap.csv"), gap, ["keyword", "volume", "cpc", "kd", "best_rival", "rival_rank"])
+    questions = people_ask(c)
+    c.write("15_questions.json", questions)
     ai_vis = ai_visibility(c, comps)
     c.write("15_ai_visibility.json", ai_vis)
     drs = [num(s["dr"]) for s in seo_rows if s["dr"] is not None]
     dr_txt = ", ".join("%s %s" % (s["domain"], s["dr"]) for s in seo_rows)
     summary = (f"{len(targets)} link targets (link to >=2 competitors); competitor DR {dr_txt}; "
                f"median referring domains {int(median([num(s['referring_domains']) for s in seo_rows]))}")
-    summary += "; AI: %s" % ai_vis["headline"]
+    summary += "; %d searches rivals get that we had not planned; %d questions people ask; AI: %s" % (len(gap), len(questions), ai_vis["headline"])
     if drs and min(drs) >= 70:
         return Result("warn", summary + "; all DR 70+: SEO is a 12+ month game")
     if len(targets) >= 20 and drs and min(drs) < 40:
@@ -318,3 +354,53 @@ def ai_visibility(c, comps, n_prompts=4):
             "google_ai_overview": {"searches": aio_total, "with_ai_answer": aio_count,
                                    "cited_sites": [{"site": d, "times": n} for d, n in sorted(aio_sources.items(), key=lambda x: -x[1])[:15]]},
                                    "ai_trusted_sources": mentions}
+
+
+def _topic_phrases(c):
+    """Each key term as a set of its real words, e.g. 'uk passport photo' -> {'passport', 'photo'}."""
+    out = []
+    for t in (c.v["data"].get("key_terms") or []):
+        ws = {w for w in re.findall(r"[a-z0-9]+", t.lower()) if len(w) > 2 and w not in ("for", "the", "and", "online", "free")}
+        if ws:
+            out.append(ws)
+    return out
+
+
+def on_topic(keyword, phrases):
+    """On topic = contains every word of at least one key term (so 'renew british passport' is not a 'passport photo' search)."""
+    ws = set(re.findall(r"[a-z0-9]+", keyword.lower()))
+    return any(p <= ws for p in phrases) if phrases else True
+
+
+def keyword_gap(c, comps, n_rivals=3):
+    """Searches the top rivals rank for (page 1-2) that are on our topic but not in our keyword list."""
+    ours = {k["keyword"] for k in read_csv(c.path("08_keywords_clean.csv"))}
+    phrases = _topic_phrases(c)
+    best = {}
+    for x in comps[:n_rivals]:
+        try:
+            rows = seo.ranked_keywords(x["domain"], c.loc, c.lang, limit=100)
+        except seo.DFSError:
+            continue
+        for r in rows:
+            k = (r["keyword"] or "").lower()
+            if not k or k in ours or not on_topic(k, phrases):
+                continue
+            if k not in best or (r["rank"] or 99) < best[k]["rival_rank"]:
+                best[k] = {"keyword": k, "volume": r["volume"] or 0, "cpc": r["cpc"] or 0, "kd": r["kd"] if r["kd"] is not None else "",
+                           "best_rival": x["domain"], "rival_rank": r["rank"] or 99}
+    return sorted(best.values(), key=lambda r: -num(r["volume"]))[:40]
+
+
+def people_ask(c):
+    """'People also ask' questions from our Google results (re-read from cache: free)."""
+    seen, out = set(), []
+    for raw in c.read("09_serp_raw.json"):
+        if raw.get("error"):
+            continue
+        for q in seo.serp(raw["keyword"], c.loc, c.lang).get("questions") or []:
+            k = q.strip().lower()
+            if k not in seen:
+                seen.add(k)
+                out.append({"question": q.strip(), "from_search": raw["keyword"]})
+    return out[:60]

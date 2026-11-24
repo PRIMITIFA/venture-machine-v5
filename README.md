@@ -31,7 +31,7 @@ A plain-language report anyone can read:
   - one line on every topic, tagged good / careful / problem
   - the top worries and what to do next
 
-  Everything after page 1 is the detail.
+  If the likely first-year sales are below your goal, the answer is capped at "test it cheaply first", even with a high score. Everything after page 1 is the detail.
 - **Is there demand?** Real Google searches, how hard each one is to rank for, and whether interest is growing.
 - **How hard is it to get onto Google, and how do you do it?** Each important search is rated Easy / Doable / Hard / Very hard, from three signals:
   - keyword difficulty
@@ -45,7 +45,12 @@ A plain-language report anyone can read:
   - how often Google shows its own AI answer, and which sources these AI answers trust
 
   It ends with how to get into AI answers.
-- **Rivals:** what they charge, and what they are weak and good at.
+- **Rivals:**
+  - what they charge, and what they are weak and good at
+  - their Google visits a month and what that traffic is worth in ads
+  - whether their traffic is growing or shrinking over 12 months
+  - how old each site is and its phone speed score
+- **Searches your rivals get that you hadn't planned** (on-topic only), and the **questions people ask Google** (from "People also ask") as page and FAQ ideas.
 - **Market size:** a careful estimate and a big-picture estimate.
 - **Money:** what you keep per sale, the most you can spend to win a customer, and whether ads would pay.
 - **Trust check and the plan.**

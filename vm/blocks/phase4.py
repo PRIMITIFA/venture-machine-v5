@@ -231,7 +231,9 @@ swap the keyword in a template are not allowed.
 3) One link-bait asset and the AI-search plan. 4) Rate our edge 1-5.{c.note()}""",
         Plan, smart=True, context={"clusters": cl_info, "business_case": c.read("18_business_case.md"),
                                    "eeat": c.read("03_eeat_quality.json"), "gap": c.read("13_competitor_business.json").get("identified_gap"),
-                                   "ux_weaknesses": [x.get("weaknesses") for x in c.read("12_competitor_ux.json")["competitors"]]})
+                                   "ux_weaknesses": [x.get("weaknesses") for x in c.read("12_competitor_ux.json")["competitors"]],
+                                   "questions_people_ask": [q["question"] for q in c.read("15_questions.json", default=[])][:30],
+                                   "searches_rivals_get_we_missed": read_csv(c.path("15_keyword_gap.csv"))[:20] if c.has("15_keyword_gap.csv") else []})
     cmap = {cl["id"]: cl for cl in clusters}
     pages = []
     for p in out.pages:
@@ -256,7 +258,8 @@ swap the keyword in a template are not allowed.
         cal.append({"week": 2, "date": (start + dt.timedelta(weeks=1)).isoformat(), "type": "ai search", "item": a, "keyword": "", "kd": "", "data_source": ""})
     cal.sort(key=lambda r: (r["week"], r["type"]))
     write_csv(c.path("19_seo_calendar_90d.csv"), cal, ["week", "date", "type", "item", "keyword", "kd", "data_source"])
-    store.set_data(c.slug, advantage_score=out.advantage_score, advantage_reason=out.advantage_reason)
+    store.set_data(c.slug, advantage_score=out.advantage_score, advantage_reason=out.advantage_reason,
+                   forecast_12m_usd={k: float(v) for k, v in out.forecast_12m_usd.items()})
     c.write("19_business_plan.md", f"""# Business plan: {c.slug}
 **Why us (5 seconds):** {out.why_us_5_seconds}
 

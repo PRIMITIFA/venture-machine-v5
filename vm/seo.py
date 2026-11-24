@@ -27,6 +27,11 @@ EST = {
     "ai_optimization/chat_gpt/llm_responses/live": 0.05,
     "ai_optimization/perplexity/llm_responses/live": 0.02,
     "ai_optimization/llm_mentions/aggregated_metrics/live": 0.12,
+    "dataforseo_labs/google/domain_rank_overview/live": 0.02,
+    "dataforseo_labs/google/historical_rank_overview/live": 0.16,
+    "dataforseo_labs/google/ranked_keywords/live": 0.03,
+    "domain_analytics/whois/overview/live": 0.15,
+    "on_page/lighthouse/live/json": 0.01,
 }
 
 GENERIC = {"reddit.com", "youtube.com", "wikipedia.org", "en.wikipedia.org", "amazon.com", "quora.com", "facebook.com",
@@ -195,7 +200,7 @@ def serp(keyword, loc, lang, depth=None):
     items = (res[0].get("items") or []) if res else []
     organic, features = [], {"ai_overview": False, "paid": 0, "people_also_ask": False, "video": False,
                              "local_pack": False, "featured_snippet": False}
-    paid, aio_refs = [], []
+    paid, aio_refs, questions = [], [], []
     for it in items:
         t = it.get("type")
         if t == "organic":
@@ -206,6 +211,9 @@ def serp(keyword, loc, lang, depth=None):
             features["paid"] += 1
             dom, url, _ = _real(it)
             paid.append({"domain": dom, "title": it.get("title") or "", "description": (it.get("description") or "")[:200], "url": url})
+        elif t == "people_also_ask":
+            features["people_also_ask"] = True
+            questions += [q.get("title") for q in (it.get("items") or []) if q.get("title")]
         elif t == "ai_overview":
             features["ai_overview"] = True
             aio_refs += _domains_in(it)
@@ -213,7 +221,8 @@ def serp(keyword, loc, lang, depth=None):
             features[t] = True
         elif t == "video":
             features["video"] = True
-    return {"keyword": keyword, "organic": organic, "paid": paid, "features": features, "ai_overview_sources": sorted(set(aio_refs))}
+    return {"keyword": keyword, "organic": organic, "paid": paid, "features": features, "ai_overview_sources": sorted(set(aio_refs)),
+            "questions": questions}
 
 
 def _domains_in(obj):
@@ -327,3 +336,59 @@ def top_pages(domain, loc, lang, limit=10):
         org = (it.get("metrics") or {}).get("organic") or {}
         out.append({"url": it.get("page_address"), "etv": org.get("etv"), "keywords": org.get("count")})
     return out
+
+
+def rank_overview(domain, loc, lang):
+    """Google traffic a site gets: visits/month (estimate), keywords it ranks for, and what that traffic would cost in ads."""
+    res = post("dataforseo_labs/google/domain_rank_overview/live", {"target": domain, "location_code": loc, "language_code": lang})
+    it = ((res[0].get("items") or [{}])[0] if res else {}) or {}
+    o = (it.get("metrics") or {}).get("organic") or {}
+    return {"visits": o.get("etv"), "keywords": o.get("count"), "ads_value": o.get("estimated_paid_traffic_cost"),
+            "top3": (o.get("pos_1") or 0) + (o.get("pos_2_3") or 0), "new_keywords": o.get("is_new"), "lost_keywords": o.get("is_lost")}
+
+
+def traffic_history(domain, loc, lang, months=12):
+    """Monthly Google visits (estimate) for the last ~12 months, oldest first."""
+    import datetime as _dt
+    start = (_dt.date.today().replace(day=1) - _dt.timedelta(days=31 * months)).replace(day=1).isoformat()
+    res = post("dataforseo_labs/google/historical_rank_overview/live",
+               {"target": domain, "location_code": loc, "language_code": lang, "date_from": start})
+    rows = []
+    for it in (res[0].get("items") or []) if res else []:
+        o = (it.get("metrics") or {}).get("organic") or {}
+        rows.append({"month": "%04d-%02d" % (it.get("year") or 0, it.get("month") or 0), "visits": round(o.get("etv") or 0)})
+    return sorted(rows, key=lambda r: r["month"])
+
+
+def ranked_keywords(domain, loc, lang, limit=100, max_rank=20):
+    """Searches a site ranks for on page 1-2, biggest first."""
+    res = post("dataforseo_labs/google/ranked_keywords/live",
+               {"target": domain, "location_code": loc, "language_code": lang, "limit": limit,
+                "filters": [["ranked_serp_element.serp_item.rank_group", "<=", max_rank]],
+                "order_by": ["keyword_data.keyword_info.search_volume,desc"]})
+    out = []
+    for it in (res[0].get("items") or []) if res else []:
+        kd = it.get("keyword_data") or {}
+        ki = kd.get("keyword_info") or {}
+        out.append({"keyword": kd.get("keyword"), "volume": ki.get("search_volume"), "cpc": ki.get("cpc"),
+                    "kd": (kd.get("keyword_properties") or {}).get("keyword_difficulty"),
+                    "rank": ((it.get("ranked_serp_element") or {}).get("serp_item") or {}).get("rank_group")})
+    return out
+
+
+def domain_ages(domains):
+    """WHOIS creation date per domain (one call for all)."""
+    ds = [d for d in domains if VALID_DOMAIN.match(d or "")][:100]
+    if not ds:
+        return {}
+    res = post("domain_analytics/whois/overview/live", {"limit": len(ds), "filters": [["domain", "in", ds]]})
+    return {it.get("domain"): (it.get("created_datetime") or "")[:10] for it in ((res[0].get("items") or []) if res else [])}
+
+
+def speed_score(url, mobile=True):
+    """Google Lighthouse performance score 0-100 (mobile by default)."""
+    if not url.startswith("http"):
+        url = "https://" + url
+    res = post("on_page/lighthouse/live/json", {"url": url, "for_mobile": mobile, "categories": ["performance"]})
+    sc = ((res[0].get("categories") or {}).get("performance") or {}).get("score") if res else None
+    return round(sc * 100) if isinstance(sc, (int, float)) else None

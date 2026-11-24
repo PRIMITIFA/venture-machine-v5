@@ -86,10 +86,16 @@ def gate3_scores(c):
 def memo3(c):
     s, avg = gate3_scores(c)
     rec = "KILL" if avg < 3.0 else "QUICK TEST (7 days, capped)" if avg < 3.5 else "FULL BUILD"
-    store.set_data(c.slug, gate3_score=avg, gate3_score100=round(avg * 20), gate3_recommendation=rec)
+    # safety rule: good scores but a forecast below the first-year goal is not a full build
+    fc = (c.v["data"].get("forecast_12m_usd") or {}).get("mid")
+    cap_note = ""
+    if rec == "FULL BUILD" and fc is not None and fc < S.year1_goal_usd:
+        rec = "QUICK TEST (7 days, capped)"
+        cap_note = f"Capped at TEST: the likely first-year sales (${fc:,.0f}) are below your goal (${S.year1_goal_usd:,.0f})."
+    store.set_data(c.slug, gate3_score=avg, gate3_score100=round(avg * 20), gate3_recommendation=rec, gate3_cap_note=cap_note)
     ue = c.v["data"].get("unit_economics", {})
     qs = c.read("16_owner_questions.md", default="")
-    lines = [f"Score {round(avg * 20)}/100 -> recommendation: {rec}"] + [f"  {k:11} {v[0] * 2:>2}/10  {v[1]}" for k, v in s.items()] + [
+    lines = [f"Score {round(avg * 20)}/100 -> recommendation: {rec}" + (f" ({cap_note})" if cap_note else "")] + [f"  {k:11} {v[0] * 2:>2}/10  {v[1]}" for k, v in s.items()] + [
         f"Model: {ue.get('model')} at ${ue.get('price_usd')} | net ${ue.get('net_per_sale')}/sale | max CAC ${ue.get('max_cac')}",
         "Answer the open questions in 16_owner_questions.md before GO." if "Answer: \n" in qs or qs.rstrip().endswith("Answer:") else "",
         _spent(c)]
@@ -97,7 +103,9 @@ def memo3(c):
     for bid, st in sorted(store.blocks(c.slug).items()):
         if st.get("verdict") == "warn" and bid not in ("05", "14", "18"):
             flags.append(f"  {bid} WARN: {(st.get('summary') or '')[:200]}")
-    overrides = [g for g in store.gates(c.slug) if g["decision"] == "override"]
+    bl = store.blocks(c.slug)
+    overrides = [g for g in store.gates(c.slug) if g["decision"] == "override"
+                 and any("OWNER OVERRIDE" in (bl.get(b, {}).get("summary") or "") for b in g["gate"].split(","))]
     if flags or overrides:
         extra = [f"  OVERRIDDEN kill at block {g['gate']}: {g['note']}" for g in overrides] + flags
         lines[1:1] = ["Read before deciding:"] + extra
