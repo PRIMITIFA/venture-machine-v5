@@ -264,6 +264,27 @@ class Pure(unittest.TestCase):
         self.assertTrue(on_topic("uk passport photo app", ph))
         self.assertFalse(on_topic("renew british passport", ph))
 
+    def test_degraded_serp_uses_snapshot(self):
+        real_post = seo.post
+        def fake(ep, task):
+            if ep.endswith("organic/live/advanced"):
+                return [{"items": [{"type": "organic", "rank_group": i, "domain": "google.com", "url": "https://google.com/goto?url=x",
+                                    "breadcrumb": "https://junk%d.com" % i, "title": "t"} for i in range(1, 6)] + [{"type": "ai_overview"}]}]
+            if ep.endswith("historical_serps/live"):
+                return [{"items": [{"datetime": "2026-01-01", "items": [{"type": "organic", "rank_group": 1, "domain": "old.com", "url": "https://old.com"}]},
+                                   {"datetime": "2026-11-01", "items": [{"type": "organic", "rank_group": 1, "domain": "www.clio.com", "url": "https://www.clio.com/"},
+                                                                        {"type": "paid", "domain": "ad.com", "url": "https://ad.com"}]}]}]
+            return real_post(ep, task)
+        seo.post = fake
+        try:
+            s = seo.serp("law practice management software", 2840, "en")
+        finally:
+            seo.post = real_post
+        self.assertEqual(s["organic"][0]["domain"], "clio.com")
+        self.assertTrue(s["source"].startswith("database snapshot 2026-11-01"))
+        self.assertTrue(s["features"]["ai_overview"])
+        self.assertEqual(s["features"]["paid"], 1)
+
     def test_economics(self):
         e = phase4.economics(price=20, data_cost=2, fee_pct=5, fee_fixed=0.4, conversion_pct=2, retention_months=3, cpc=1.0)
         self.assertEqual(e["net_per_sale"], 16.6)

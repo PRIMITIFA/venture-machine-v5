@@ -32,6 +32,7 @@ EST = {
     "dataforseo_labs/google/ranked_keywords/live": 0.03,
     "domain_analytics/whois/overview/live": 0.15,
     "on_page/lighthouse/live/json": 0.01,
+    "dataforseo_labs/google/historical_serps/live": 0.005,
 }
 
 GENERIC = {"reddit.com", "youtube.com", "wikipedia.org", "en.wikipedia.org", "amazon.com", "quora.com", "facebook.com",
@@ -193,11 +194,7 @@ def _real(it):
     return dom, url, url
 
 
-def serp(keyword, loc, lang, depth=None):
-    res = post("serp/google/organic/live/advanced",
-               {"keyword": clean_kw(keyword), "location_code": loc, "language_code": lang,
-                "depth": depth or K("serp_depth"), "device": "desktop"})
-    items = (res[0].get("items") or []) if res else []
+def _parse_serp_items(items):
     organic, features = [], {"ai_overview": False, "paid": 0, "people_also_ask": False, "video": False,
                              "local_pack": False, "featured_snippet": False}
     paid, aio_refs, questions = [], [], []
@@ -219,10 +216,48 @@ def serp(keyword, loc, lang, depth=None):
             aio_refs += _domains_in(it)
         elif t in features:
             features[t] = True
-        elif t == "video":
-            features["video"] = True
+    return organic, paid, features, aio_refs, questions
+
+
+def degraded(items):
+    """Google now often serves scrapers a reduced page: links hidden behind google.com/goto, no ads, odd sites.
+    Such a page does not show what real people see."""
+    org = [i for i in items if i.get("type") == "organic"]
+    hidden = sum(1 for i in org if "google.com/goto" in (i.get("url") or ""))
+    return bool(org) and hidden / len(org) >= 0.5
+
+
+def serp_snapshot(keyword, loc, lang):
+    """Newest real page-1 snapshot from DataForSEO's database (historical SERPs, about $0.0005)."""
+    res = post("dataforseo_labs/google/historical_serps/live", {"keyword": clean_kw(keyword), "location_code": loc, "language_code": lang})
+    snaps = (res[0].get("items") or []) if res else []
+    snaps = [x for x in snaps if any(i.get("type") == "organic" for i in (x.get("items") or []))]
+    if not snaps:
+        return None
+    return max(snaps, key=lambda x: x.get("datetime") or "")
+
+
+def serp(keyword, loc, lang, depth=None):
+    """Google page 1. Uses the live page; if Google served a reduced (degraded) page, the organic results come from the
+    newest real database snapshot instead, and only the AI Overview check is taken from the live page."""
+    res = post("serp/google/organic/live/advanced",
+               {"keyword": clean_kw(keyword), "location_code": loc, "language_code": lang,
+                "depth": depth or K("serp_depth"), "device": "desktop"})
+    items = (res[0].get("items") or []) if res else []
+    organic, paid, features, aio_refs, questions = _parse_serp_items(items)
+    source = "live"
+    if degraded(items):
+        snap = serp_snapshot(keyword, loc, lang)
+        if snap:
+            o2, p2, f2, _a, q2 = _parse_serp_items(snap.get("items") or [])
+            live_aio = features["ai_overview"]
+            organic, paid, questions = o2, p2, (q2 or questions)
+            features = dict(f2, ai_overview=live_aio or f2["ai_overview"])
+            source = "database snapshot %s" % (snap.get("datetime") or "")[:10]
+        else:
+            source = "live (reduced page, no snapshot)"
     return {"keyword": keyword, "organic": organic, "paid": paid, "features": features, "ai_overview_sources": sorted(set(aio_refs)),
-            "questions": questions}
+            "questions": questions, "source": source}
 
 
 def _domains_in(obj):
