@@ -267,6 +267,13 @@ def rank_level(cl):
 
 def answer_of(v, data, n_done):
     st, rec = v["status"], data.get("gate3_recommendation") or ""
+    if st == "light_done":
+        q, sc_ = data.get("quick_recommendation") or "", data.get("quick_score100")
+        if q.startswith("WORTH"):
+            return "WORTH A FULL CHECK", GOOD, "Quick check score %s out of 100. The basics look good; a full check will look at rivals, AI, market and money." % sc_
+        if q.startswith("MAYBE"):
+            return "MAYBE: FULL CHECK IF YOU LIKE IT", CARE, "Quick check score %s out of 100. Some basics are weak; only dig deeper if you really like the idea." % sc_
+        return "SKIP IT", BAD, "Quick check score %s out of 100. The basics are weak." % sc_
     if st == "killed":
         return "DON'T BUILD IT", BAD, "You stopped this idea. It stays in the archive so it is never suggested again."
     if st == "kill_recommended":
@@ -334,8 +341,16 @@ def build_html(slug):
         why += " Step %s said stop (%s) and you chose to continue anyway." % (", ".join(sorted({g["gate"] for g in overridden})), "; ".join(said))
     buy = [k for k in (kws or []) if k["intent"] in ("buy", "competitor", "brand-model")]
     buy_vol = int(sum(num(k["volume"]) for k in buy))
+    depth = data.get("depth", "full")
+    quick = depth == "light"
+    QMAP = QUESTIONS
     try:
-        scores, avg = gate3_scores(Ctx(slug)) if comps and mk and seo_ and clusters else (None, None)
+        if quick:
+            from .blocks.gates import light_scores, LIGHT_QUESTIONS
+            scores, avg = light_scores(Ctx(slug)) if kws else (None, None)
+            QMAP = LIGHT_QUESTIONS
+        else:
+            scores, avg = gate3_scores(Ctx(slug)) if comps and mk and seo_ and clusters else (None, None)
     except Exception:
         scores, avg = None, None
     score100 = int(round(avg / 5 * 100)) if avg else None
@@ -373,6 +388,10 @@ def build_html(slug):
         nxt += ["%s (about %s min): %s" % (t["task"], t["minutes"], t["why"]) for t in costs["owner_todo"][:6]]
     elif st == "quick_test" and tf("20_quick_test.md"):
         nxt.append("Run the quick test described in 'The plan'. Stop the moment the kill line is hit.")
+    elif st == "light_done":
+        nxt += ["If the quick score is good, run the full check: vm deepen %s full (about $2-3 more), or in the app press 'Run full check'." % slug,
+                "Want everything bigger (more searches, countries, AI questions)? vm deepen %s deep (about $4-7)." % slug,
+                "Not convinced? vm gate %s kill (it stays archived so it is never suggested again)." % slug]
     elif st in ("kill_recommended", "alert"):
         nxt += ["Read the worries.", "Agree and stop: vm gate %s kill" % slug, "Or continue anyway with a reason: vm gate %s override \"why\"" % slug]
     elif st == "killed":
@@ -444,7 +463,8 @@ def build_html(slug):
                        *verdict(sc["effort"]["days_to_mvp"] <= 14, sc["effort"]["days_to_mvp"] <= 30)))
 
     # ================= THE SIMPLE REPORT (page 1-2) =================
-    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; FINDINGS REPORT &middot; %s</div>" % e(store.now()[:10]))
+    level = {"light": "QUICK CHECK", "full": "FULL CHECK", "deep": "DEEP CHECK"}.get(depth, "FULL CHECK")
+    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; %s REPORT &middot; %s</div>" % (level, e(store.now()[:10])))
     H.append("<h1>%s</h1>" % e(v["one_liner"] or v["idea"]))
     H.append("<p class=mute>Checked for: %s &middot; Steps done: %d of 18 &middot; Data bought: %s</p>"
              % (e(v["country"].upper()), n_done, money(store.spent(slug))))
@@ -454,10 +474,12 @@ def build_html(slug):
     H.append("<div class=hero style='background:%s'><div class=herogrid>%s<div><div class=lbl>THE ANSWER</div><div class=ans>%s</div><p>%s</p></div></div></div>"
              % (color, ring, e(ans), e(why)))
     if scores:
-        H.append("<h3>The 7 scores (out of 10)</h3><div class=mini>" + "".join(
+        H.append("<h3>The %d scores (out of 10)</h3><div class=mini>" % len(scores) + "".join(
             "<div><span class=q>%s</span><span class=bar><i style='width:%d%%;background:%s'></i></span><b>%d</b></div>"
-            % (e(QUESTIONS.get(k, k)), val * 20, GOOD if val >= 4 else CARE if val == 3 else BAD, val * 2) for k, (val, _w) in scores.items()) + "</div>"
-            + "<p class='small mute'>Overall score = the average of the 7, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build, unless the likely first-year sales are below your goal (then: test first).</p>")
+            % (e(QMAP.get(k, k)), val * 20, GOOD if val >= 4 else CARE if val == 3 else BAD, val * 2) for k, (val, _w) in scores.items()) + "</div>"
+            + ("<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
+               "A quick check does not look at rivals, AI assistants, market size or money yet.</p>" if quick else
+               "<p class='small mute'>Overall score = the average of the 7, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build, unless the likely first-year sales are below your goal (then: test first).</p>"))
     if glance:
         H.append("<h3>Everything at a glance</h3><table class=glance>" + "".join(
             "<tr><td class=t>%s</td><td>%s</td><td class=n>%s</td></tr>" % (e(t), e(f), pill(w, c)) for t, f, w, c in glance) + "</table>")
@@ -476,13 +498,15 @@ def build_html(slug):
 
     # ================= PART 1: SCORECARD IN DETAIL =================
     sec[0] += 1
-    H.append("<span class=num>PART 1</span><h2>The scorecard in detail</h2><p class=mute>The 7 things that decide if this idea is worth building, each out of 10.</p>")
+    H.append("<span class=num>PART 1</span><h2>The scorecard in detail</h2><p class=mute>The %s things that decide if this idea is worth %s, each out of 10.</p>"
+             % ("6" if quick else "7", "a deeper look" if quick else "building"))
     if scores:
-        H.append(plain("Overall <b>%d out of 100</b>. Under 60 means don't build. 60 to 69 means run a cheap test first. 70 or more means build." % score100))
+        H.append(plain(("Quick score <b>%d out of 100</b>. Under 55 means skip it. 55 to 69 means maybe. 70 or more means it is worth a full check." if quick else
+                        "Overall <b>%d out of 100</b>. Under 60 means don't build. 60 to 69 means run a cheap test first. 70 or more means build.") % score100))
         for k, (val, why_) in scores.items():
             col = GOOD if val >= 4 else CARE if val == 3 else BAD
             H.append("<div class=score><div class=q>%s</div><div class=bar><i style='width:%d%%;background:%s'></i></div><div><b>%d</b>/10</div><div class=why>%s</div></div>"
-                     % (e(QUESTIONS.get(k, k)), val * 20, col, val * 2, e(why_)))
+                     % (e(QMAP.get(k, k)), val * 20, col, val * 2, e(why_)))
     else:
         H.append(plain("The scores appear once all research steps are done (step 18). So far %d of 18 steps are done." % n_done))
     H.append("<h3>All the worries</h3>")

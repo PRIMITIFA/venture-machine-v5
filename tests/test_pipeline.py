@@ -170,12 +170,28 @@ class Pipeline(unittest.TestCase):
         from vm import report, pdf
         self.assertTrue(report.write(slug).exists())
         h = pdf.build_html(slug)
-        for part in ("FINDINGS REPORT", "THE ANSWER", "The scorecard", "Is there demand?", "Who are you up against?",
+        for part in ("FULL CHECK REPORT", "THE ANSWER", "The scorecard", "Is there demand?", "Who are you up against?",
                      "How big is the money?", "Will it make money?", "The plan", "Glossary", "Sources", "IN PLAIN WORDS",
                      "How hard is it to get onto Google", "How to rank: the plan", "Do AI assistants recommend you?"):
             self.assertIn(part, h)
         f, msg = pdf.write(slug)  # a real PDF if a browser is installed, else a clear message
         self.assertTrue(f is None or f.stat().st_size > 1000, msg)
+
+    def test_quick_check_then_deepen(self):
+        slug = pipeline.new("light check idea about window stickers", country="us", depth="light")
+        self.assertEqual(pipeline.run(slug, say=lambda m: None), "light_done")
+        v = store.venture(slug)
+        self.assertIn("quick_score100", v["data"])
+        self.assertEqual(store.block(slug, "10")["status"], "PENDING")  # no rival deep-dive in a quick check
+        from vm import pdf
+        h = pdf.build_html(slug)
+        self.assertIn("QUICK CHECK REPORT", h)
+        self.assertIn("vm deepen", h)
+        before = store.spent(slug)
+        self.assertLess(before, 0.5)
+        pipeline.deepen(slug, "full")
+        self.assertEqual(store.venture(slug)["data"]["depth"], "full")
+        self.assertEqual(pipeline.run(slug, say=lambda m: None), "gate_14")  # gate 1 already passed by deepening
 
     def test_pivot_resets_phase2_3(self):
         slug = pipeline.new("pivot test idea about stickers", country="gb")

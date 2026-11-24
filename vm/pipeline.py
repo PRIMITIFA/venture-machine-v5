@@ -101,16 +101,19 @@ def by_id():
     return {b.id: b for b in registry()}
 
 
-def new(idea, source="", country="us", lang=None, slug=None):
+def new(idea, source="", country="us", lang=None, slug=None, depth="full"):
     from .util import slugify
-    from .config import COUNTRY_LANG
+    from .config import COUNTRY_LANG, DEPTHS
+    if depth not in DEPTHS:
+        raise SystemExit(f"depth must be one of: {', '.join(DEPTHS)}")
     location_code(country)  # validates
     slug = slug or slugify(idea)
     base, i = slug, 2
     while store.venture(slug):
         slug, i = f"{base}-{i}", i + 1
     store.create_venture(slug, idea, source, country.lower(), (lang or COUNTRY_LANG.get(country.lower(), "en")))
-    store.log(slug, "new", idea)
+    store.set_data(slug, depth=depth)
+    store.log(slug, "new", f"[{depth}] {idea}")
     return slug
 
 
@@ -178,11 +181,23 @@ def run(slug, say=print, stop_at_gate=True):
     if v["status"] in ("kill_recommended",):
         say(f"{slug} waits for you: a block recommends KILL. vm gate {slug} kill | vm gate {slug} override \"why\"")
         return v["status"]
+    from .config import ACTIVE, LIGHT_BLOCKS
+    depth = v["data"].get("depth", "full")
+    ACTIVE["depth"] = depth
     store.update_venture(slug, status="running")
     for b in registry():
         st = store.block(slug, b.id)
         if st["status"] == "VALIDATED":
             continue
+        if depth == "light" and b.id not in LIGHT_BLOCKS:
+            if b.id == "05":  # no stop in a quick check
+                store.set_block(slug, b.id, status="VALIDATED", verdict="pass", summary="skipped: quick check runs straight through")
+                continue
+            from .blocks.gates import light_memo
+            memo = light_memo(Ctx(slug))
+            store.update_venture(slug, status="light_done")
+            say(f"\n=== Quick check result ===\n{memo.summary}\n\nNext: vm deepen {slug} full   (or: deep)   |   vm gate {slug} kill")
+            return "light_done"
         if b.kind == "gate":
             memo = b.run(Ctx(slug))
             store.set_block(slug, b.id, status="WAITING", summary=memo.summary)
@@ -247,6 +262,27 @@ def gate(slug, decision, note=""):
         return "GO: approved for phase 5 (build). Your manual list is in OWNER-TODO.json."
     store.update_venture(slug, status="active")
     return f"{decision.upper()} saved. Run: vm run {slug}"
+
+
+def deepen(slug, depth="full"):
+    """Upgrade a quick check to a full or deep check (or a full check to deep). Data already fetched is re-used."""
+    from .config import DEPTHS
+    v = store.venture(slug)
+    if not v:
+        raise SystemExit(f"no venture '{slug}'")
+    if depth not in ("full", "deep"):
+        raise SystemExit("deepen to: full | deep")
+    order = list(DEPTHS)
+    cur = v["data"].get("depth", "full")
+    if order.index(depth) <= order.index(cur):
+        raise SystemExit(f"{slug} is already a {DEPTHS[cur]['label'].lower()}")
+    store.set_data(slug, depth=depth)
+    store.add_gate(slug, "05", "go", f"deepen to {depth}")
+    store.set_block(slug, "05", status="VALIDATED", verdict="pass", summary=f"owner: GO (deepened to a {DEPTHS[depth]['label'].lower()})")
+    ids = [b.id for b in registry()]
+    store.reset_blocks(slug, ids[ids.index("06"):])
+    store.update_venture(slug, status="active", pivot_note=v.get("pivot_note") or "")
+    return f"{slug} is now a {DEPTHS[depth]['label'].lower()} ({DEPTHS[depth]['about']}). Run: vm run {slug}"
 
 
 def rerun(slug, block_id):

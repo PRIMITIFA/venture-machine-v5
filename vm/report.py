@@ -25,7 +25,7 @@ input,textarea,select{font:inherit;padding:8px 10px;border:1px solid var(--line)
 
 STATUS = {"gate_05": "Waiting: Gate 1", "gate_14": "Waiting: Gate 2", "gate_18": "Waiting: Gate 3", "active": "Ready to run",
           "running": "Running", "alert": "Stopped (see red block)", "kill_recommended": "Kill recommended", "killed": "Killed",
-          "approved_build": "Approved to build", "quick_test": "Quick test", "phase4_done": "Phase 4 done"}
+          "approved_build": "Approved to build", "light_done": "Quick check done", "quick_test": "Quick test", "phase4_done": "Phase 4 done"}
 
 
 def status_label(st):

@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .. import ai, seo
-from ..config import S
+from ..config import K, S
 from ..pipeline import Result
 from ..util import domain_of, num, pct_change, read_csv, write_csv
 
@@ -81,9 +81,9 @@ def b07_volumes(c):
                               "source": "google_ads " + srcmap.get(r["keyword"], "seed")}
     # real long-tail from the 3 strongest buying seeds
     buy_seeds = sorted([s for s in seeds if s["category"] in ("buy", "product")],
-                       key=lambda s: -num(rows.get(s["seed_keyword"], {}).get("volume")))[:3]
+                       key=lambda s: -num(rows.get(s["seed_keyword"], {}).get("volume")))[:K("suggest_seeds")]
     for s in buy_seeds:
-        for it in seo.suggestions(s["seed_keyword"], c.loc, c.lang, limit=40):
+        for it in seo.suggestions(s["seed_keyword"], c.loc, c.lang, limit=K("suggest_limit")):
             k = it.get("keyword")
             ki = it.get("keyword_info") or {}
             if k and k not in rows:
@@ -163,7 +163,7 @@ def b08_serp_clusters(c):
     kws = read_csv(c.path("08_keywords_clean.csv"))
     for k in kws:
         k["prio"] = num(k["volume"]) * max(num(k["cpc"]), 0.30) * INTENT_W.get(k["intent"], 0.6)
-    top = sorted(kws, key=lambda k: -k["prio"])[:S.max_serps]
+    top = sorted(kws, key=lambda k: -k["prio"])[:K("max_serps")]
     raw = seo.serps([k["keyword"] for k in top], c.loc, c.lang)
     meta = {k["keyword"]: k for k in top}
     for s in raw:

@@ -43,16 +43,18 @@ def home():
     for v in store.ventures():
         done = sum(1 for b in store.blocks(v["slug"]).values() if b["status"] == "VALIDATED")
         st = "running..." if v["slug"] in RUNNING else report.status_label(v["status"])
-        rows += (f"<tr><td><a href='/v/{e(v['slug'])}'>{e(v['one_liner'] or v['idea'])}</a><div class=mute>{e(v['slug'])}</div></td>"
+        rows += (f"<tr><td><a href='/v/{e(v['slug'])}'>{e(v['one_liner'] or v['idea'])}</a><div class=mute>{e(v['slug'])} &middot; {e(v['data'].get('depth', 'full'))}</div></td>"
                  f"<td>{e(st)}</td><td>{done}/18</td><td>${store.spent(v['slug']):.2f}</td></tr>")
     opts = "".join(f"<option value='{c}'{' selected' if c == 'us' else ''}>{c.upper()}</option>" for c in LOCATIONS if c != "uk")
     return report.page("Venture Machine", f"""
-<h1>Venture Machine</h1><p class=mute>Phases 1-4: idea filter, demand + SEO, competitors + market, plan + costs. Cap ${S.max_usd_per_idea:.2f} per idea.</p>
+<h1>Venture Machine</h1><p class=mute>Check any business idea with real Google data. Pick a quick check (minutes, cents) or a full / deep check (rivals, AI assistants, market, money, plan).</p>
 <div class=card><form method=post action=/new>
 <label>Idea (who wants what, and what would they pay for?)</label>
 <textarea name=idea rows=3 required placeholder="People who buy used cars want the original window sticker and would pay $15 for it"></textarea>
 <div class=grid style="margin-top:10px"><div><label>Source link (optional)</label><input name=source></div>
-<div><label>Country</label><select name=country>{opts}</select></div></div>
+<div><label>Country</label><select name=country>{opts}</select></div>
+<div><label>How deep</label><select name=depth><option value=light>Quick check: ~5 min, ~$0.20</option>
+<option value=full selected>Full check: ~30 min, ~$2-3</option><option value=deep>Deep check: ~45 min, ~$4-7</option></select></div></div>
 <p><button class=primary>Add and run</button></p></form></div>
 <h2>Ideas</h2><div class=card><table><tr><th>Idea</th><th>Status</th><th>Blocks</th><th>Spent</th></tr>{rows or '<tr><td colspan=4 class=mute>none yet</td></tr>'}</table></div>""",
                        refresh=bool(RUNNING))
@@ -84,6 +86,13 @@ def venture_page(slug):
             acts += (f"<div class=card><b>Stopped: {e(st)}</b> - see the red block below.<p>{btn('kill', 'danger')}"
                      f"<form class=inline method=post action='/gate/{e(slug)}'><input type=hidden name=decision value=override>"
                      f"<input name=note placeholder='why continue anyway' required style='width:40%'> <button>OVERRIDE</button></form></p></div>")
+        elif st == "light_done":
+            memo = store.block(slug, "09").get("summary", "")
+            qm = (S.ventures_dir / slug / "09_quick_memo.md")
+            acts += ("<div class=card><b>Quick check done</b><pre>%s</pre><p>"
+                     "<form class=inline method=post action='/deepen/%s'><input type=hidden name=depth value=full><button class=primary>Run full check (~$2-3)</button></form> "
+                     "<form class=inline method=post action='/deepen/%s'><input type=hidden name=depth value=deep><button>Run deep check (~$4-7)</button></form> %s</p></div>"
+                     % (e(qm.read_text(encoding="utf-8") if qm.exists() else memo), e(slug), e(slug), btn("kill", "danger")))
         elif st not in ("killed", "approved_build", "phase4_done", "quick_test"):
             acts += f"<form method=post action='/run/{e(slug)}'><button class=primary>Run next blocks</button></form>"
     return report.page(slug, report.body(slug, acts), refresh=slug in RUNNING)
@@ -141,11 +150,16 @@ class H(BaseHTTPRequestHandler):
         f = self.form()
         try:
             if path == "/new":
-                slug = pipeline.new(f.get("idea", "").strip(), f.get("source", "").strip(), f.get("country", "us"))
+                slug = pipeline.new(f.get("idea", "").strip(), f.get("source", "").strip(), f.get("country", "us"), depth=f.get("depth", "full"))
                 start(slug)
                 return self.send(303, "", loc=f"/v/{slug}")
             if path.startswith("/run/"):
                 slug = path[5:]
+                start(slug)
+                return self.send(303, "", loc=f"/v/{slug}")
+            if path.startswith("/deepen/"):
+                slug = path[8:]
+                pipeline.deepen(slug, f.get("depth", "full"))
                 start(slug)
                 return self.send(303, "", loc=f"/v/{slug}")
             if path.startswith("/gate/"):

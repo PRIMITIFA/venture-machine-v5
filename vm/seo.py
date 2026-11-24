@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 
 from . import budget, store
-from .config import S
+from .config import K, S
 
 BASE = "https://api.dataforseo.com/v3/"
 
@@ -196,7 +196,7 @@ def _real(it):
 def serp(keyword, loc, lang, depth=None):
     res = post("serp/google/organic/live/advanced",
                {"keyword": clean_kw(keyword), "location_code": loc, "language_code": lang,
-                "depth": depth or S.serp_depth, "device": "desktop"})
+                "depth": depth or K("serp_depth"), "device": "desktop"})
     items = (res[0].get("items") or []) if res else []
     organic, features = [], {"ai_overview": False, "paid": 0, "people_also_ask": False, "video": False,
                              "local_pack": False, "featured_snippet": False}

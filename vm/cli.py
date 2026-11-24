@@ -7,8 +7,9 @@ from .config import ROOT, S, load_env
 
 
 def cmd_new(a):
-    slug = pipeline.new(a.idea, a.source or "", a.country, a.lang, a.slug)
-    print(f"created '{slug}'. Next: python vm.py run {slug}")
+    slug = pipeline.new(a.idea, a.source or "", a.country, a.lang, a.slug, depth=a.depth)
+    from .config import DEPTHS
+    print(f"created '{slug}' as a {DEPTHS[a.depth]['label'].lower()} ({DEPTHS[a.depth]['about']}). Next: python vm.py run {slug}")
     if a.run:
         cmd_run(argparse.Namespace(slug=slug))
 
@@ -33,7 +34,7 @@ def cmd_list(a):
         print("no ventures yet. python vm.py new \"people who ... want ... and would pay for ...\"")
     for v in vs:
         done = sum(1 for b in store.blocks(v["slug"]).values() if b["status"] == "VALIDATED")
-        print(f"{v['slug']:40} {v['status']:18} {done:2}/18  ${store.spent(v['slug']):.2f}  {v['one_liner'] or v['idea']}"[:180])
+        print(f"{v['slug']:40} {v['data'].get('depth', 'full'):5} {v['status']:18} {done:2}/18  ${store.spent(v['slug']):.2f}  {v['one_liner'] or v['idea']}"[:180])
 
 
 def cmd_show(a):
@@ -46,6 +47,12 @@ def cmd_show(a):
         st = bl.get(b.id, {"status": "PENDING", "verdict": "", "summary": "", "error": ""})
         tail = (st.get("summary") or "").split("\n")[0] + (f" | {st['error']}" if st.get("error") else "")
         print(f" {b.id} {b.name[:32]:32} {st['status']:9} {st.get('verdict') or '':5} {tail}"[:200])
+
+
+def cmd_deepen(a):
+    print(pipeline.deepen(a.slug, a.depth))
+    if a.run:
+        cmd_run(argparse.Namespace(slug=a.slug))
 
 
 def cmd_rerun(a):
@@ -72,7 +79,8 @@ def cmd_doctor(a):
             print(f"DataForSEO  : ERROR {e}")
     else:
         print("DataForSEO  : not set (DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD). Phases 2-3 need it.")
-    print(f"caps        : ${S.max_usd_per_idea:.2f} per idea, ${S.phase1_max_usd:.2f} for phase 1")
+    from .config import DEPTHS, cap_usd
+    print("caps        : " + ", ".join(f"{d['label']} ${cap_usd(k):.2f}" for k, d in DEPTHS.items()) + f" (phase 1 ${S.phase1_max_usd:.2f})")
     try:
         import playwright  # noqa: F401
         print("screenshots : playwright installed")
@@ -97,8 +105,15 @@ def main(argv=None):
     s.add_argument("--country", default="us", help="target country code (us, gb, de, lt...) or a Google location code")
     s.add_argument("--lang", help="language code (default: from country)")
     s.add_argument("--slug")
+    s.add_argument("--depth", choices=["light", "full", "deep"], default="full",
+                   help="light = quick check (~5 min, ~$0.20) | full = all 18 steps (~$2-3) | deep = bigger full check (~$4-7)")
     s.add_argument("--run", action="store_true", help="start running right away")
     s.set_defaults(f=cmd_new)
+    s = sub.add_parser("deepen", help="upgrade a quick check to full/deep (re-uses data already fetched)")
+    s.add_argument("slug")
+    s.add_argument("depth", choices=["full", "deep"])
+    s.add_argument("--run", action="store_true")
+    s.set_defaults(f=cmd_deepen)
     s = sub.add_parser("run", help="run blocks until the next owner gate")
     s.add_argument("slug")
     s.set_defaults(f=cmd_run)

@@ -128,3 +128,40 @@ def location_code(country):
     if c not in LOCATIONS:
         raise ValueError(f"unknown country '{country}'. Use one of {sorted(LOCATIONS)} or a Google location code")
     return LOCATIONS[c]
+
+
+# ---------------- research depth: quick / full / deep ----------------
+# Each level is the same machine with different sizes. Upgrading later re-uses everything already fetched (cache).
+DEPTHS = {
+    "light": {"label": "Quick check", "about": "about 5 minutes, about $0.20 of data", "cap_env": "VM_LIGHT_MAX_USD", "cap": 0.5,
+              "max_serps": 10, "serp_depth": 10, "suggest_seeds": 1, "suggest_limit": 20},
+    "full": {"label": "Full check", "about": "about 30 minutes, about $2-3 of data", "cap_env": "VM_MAX_USD_PER_IDEA", "cap": 5.0,
+             "max_serps": 60, "serp_depth": 20, "suggest_seeds": 3, "suggest_limit": 40, "ai_prompts": 4,
+             "history_rivals": 3, "gap_rivals": 3, "ref_limit": 300, "extra_countries": []},
+    "deep": {"label": "Deep check", "about": "about 45 minutes, about $4-7 of data", "cap_env": "VM_DEEP_MAX_USD", "cap": 10.0,
+             "max_serps": 120, "serp_depth": 20, "suggest_seeds": 6, "suggest_limit": 60, "ai_prompts": 8,
+             "history_rivals": 5, "gap_rivals": 5, "ref_limit": 800, "extra_countries": ["ie", "nz", "de", "fr", "nl"]},
+}
+LIGHT_BLOCKS = ["01", "02", "03", "04", "06", "07", "08", "09"]
+ACTIVE = {"depth": "full"}  # set by the pipeline for the venture being run
+
+
+def K(name):
+    """A size setting for the active depth. Env vars (VM_MAX_SERPS, VM_SERP_DEPTH) still override full/deep."""
+    d = ACTIVE.get("depth") or "full"
+    if d != "light":
+        if name == "max_serps" and os.environ.get("VM_MAX_SERPS") and d == "full":
+            return S.max_serps
+        if name == "serp_depth" and os.environ.get("VM_SERP_DEPTH"):
+            return S.serp_depth
+    return DEPTHS.get(d, DEPTHS["full"]).get(name, DEPTHS["full"].get(name))
+
+
+def cap_usd(depth):
+    p = DEPTHS.get(depth or "full", DEPTHS["full"])
+    if depth in (None, "full"):
+        return S.max_usd_per_idea
+    try:
+        return float(os.environ.get(p["cap_env"], p["cap"]))
+    except ValueError:
+        return p["cap"]

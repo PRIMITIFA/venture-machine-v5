@@ -1,6 +1,6 @@
 """Hard money caps. Every paid call asks check() first, with an estimate, and is refused if it could pass the cap."""
 from . import store
-from .config import S
+from .config import DEPTHS, S, cap_usd
 
 PHASE1 = ["01", "02", "03", "04", "05"]
 
@@ -17,10 +17,13 @@ def check(est_usd):
     if not slug:
         return
     total = store.spent(slug)
-    if total + est_usd > S.max_usd_per_idea + 1e-9:
+    v = store.venture(slug) or {}
+    depth = (v.get("data") or {}).get("depth", "full")
+    cap = cap_usd(depth)
+    if total + est_usd > cap + 1e-9:
         raise BudgetExceeded(
-            f"cap ${S.max_usd_per_idea:.2f} per idea: spent ${total:.3f}, next call needs ~${est_usd:.3f}. "
-            f"Raise VM_MAX_USD_PER_IDEA to continue.")
+            f"cap ${cap:.2f} for a {DEPTHS[depth]['label'].lower()}: spent ${total:.3f}, next call needs ~${est_usd:.3f}. "
+            f"Raise {DEPTHS[depth]['cap_env']} to continue.")
     if blk in PHASE1:
         p1 = store.spent(slug, PHASE1)
         if p1 + est_usd > S.phase1_max_usd + 1e-9:

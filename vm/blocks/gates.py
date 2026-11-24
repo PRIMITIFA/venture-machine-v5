@@ -10,7 +10,8 @@ from ..util import num, read_csv
 
 
 def _spent(c):
-    return f"spent so far ${store.spent(c.slug):.2f} of ${S.max_usd_per_idea:.2f}"
+    from ..config import cap_usd
+    return f"spent so far ${store.spent(c.slug):.2f} of ${cap_usd(c.v['data'].get('depth', 'full')):.2f}"
 
 
 def memo1(c):
@@ -159,3 +160,62 @@ Written {store.now()}. Thresholds are fixed and must not change after results.
 When it ends: `vm rerun {c.slug} 18` and decide again.
 """)
     return p
+
+
+# ---------------- Quick check (light depth) ----------------
+LIGHT_QUESTIONS = {
+    "demand": "Do people search for it?", "value": "Are buyers worth money?", "paying": "Do people already pay for this?",
+    "rank": "Can a new site get onto Google?", "alive": "Is the market alive?", "effort": "Is it worth the effort?",
+}
+
+
+def light_scores(c):
+    """6 checks, each 1-5, from what a quick check knows (no rival deep-dive yet)."""
+    def band(v, cuts):
+        for s_, cut in zip((5, 4, 3, 2), cuts):
+            if v >= cut:
+                return s_
+        return 1
+    kws = read_csv(c.path("08_keywords_clean.csv")) if c.has("08_keywords_clean.csv") else []
+    buy = [k for k in kws if k["intent"] in ("buy", "competitor", "brand-model")]
+    buy_vol = sum(num(k["volume"]) for k in buy)
+    max_cpc = max([num(k["cpc"]) for k in buy] or [0])
+    how = c.read("02_how_analysis.json", default={}) or {}
+    priced = [x for x in how.get("competitors", []) if x.get("price") and "unknown" not in x["price"].lower()]
+    pulse = c.read("04_niche_pulse.json", default={}) or {}
+    ch = pulse.get("change_24m_pct_best")
+    st_ = pulse.get("status")
+    if st_ == "dying":
+        alive = 1
+    elif ch is not None and ch < -30:
+        alive = 2
+    elif ch is not None and ch < -10:
+        alive = 3
+    else:
+        alive = 5 if st_ == "alive" else 3
+    clusters = c.read("10_clusters_serp.json", default=[]) or []
+    easy = sum(1 for cl in clusters[:15] if cl.get("kd") not in ("", None) and num(cl["kd"]) <= 30) / max(min(len(clusters), 15), 1)
+    sc = c.read("05_scorecard.json", default={}) or {}
+    ice = num(sc.get("ice_avg"), 5)
+    s = {
+        "demand": (band(buy_vol, (5000, 2000, 1000, 300)), f"{int(buy_vol):,} searches a month from people ready to buy (want 1,000+)"),
+        "value": (band(max_cpc, (5, 3, 2, 1)), f"advertisers pay up to ${max_cpc:.2f} per click (want $2+)"),
+        "paying": (5 if len(priced) >= 5 else 4 if len(priced) >= 3 else 3 if len(priced) == 2 else 2 if priced else 1,
+                   f"{len(priced)} sites already charge money for this"),
+        "rank": (band(easy, (0.6, 0.4, 0.25, 0.1)), f"{easy:.0%} of the top searches have easy or medium difficulty (30 or less)"),
+        "alive": (alive, f"niche is {pulse.get('status', 'unknown')}" + (f", searches {ch:+.0f}% in 2 years" if ch is not None else "")),
+        "effort": (max(1, min(5, round(ice / 2))), f"quick gut-check (ICE) {ice}/10, first version in {(sc.get('effort') or {}).get('days_to_mvp', '?')} days"),
+    }
+    avg = round(sum(v[0] for v in s.values()) / len(s), 2)
+    return s, avg
+
+
+def light_memo(c):
+    s, avg = light_scores(c)
+    score = round(avg * 20)
+    rec = "WORTH A FULL CHECK" if score >= 70 else "MAYBE: FULL CHECK IF YOU LIKE IT" if score >= 55 else "SKIP IT"
+    store.set_data(c.slug, quick_score100=score, quick_recommendation=rec)
+    lines = [f"Quick score {score}/100 -> {rec}"] + [f"  {LIGHT_QUESTIONS[k]:34} {v[0] * 2:>2}/10  {v[1]}" for k, v in s.items()] + [
+        _spent(c), "A full check adds rivals, AI assistants, market size, money and a plan (about $2-3); a deep check goes bigger (about $4-7)."]
+    c.write("09_quick_memo.md", "# Quick check\n\n" + "\n".join(lines))
+    return Result("pass", "\n".join(lines))

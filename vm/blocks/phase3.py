@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from .. import ai, seo, web
-from ..config import S
+from ..config import K, S
 from ..pipeline import Result
 from ..util import md_table, median, num, read_csv, write_csv
 
@@ -183,7 +183,7 @@ def b12_market(c):
             rival_traffic[x["domain"]] = {"error": str(ex)[:150]}
     history, trends = {}, []
     by_visits = sorted(comps, key=lambda x: -num((rival_traffic.get(x["domain"]) or {}).get("visits")))
-    for x in by_visits[:3]:
+    for x in by_visits[:K("history_rivals")]:
         try:
             h = seo.traffic_history(x["domain"], c.loc, c.lang)
         except seo.DFSError:
@@ -198,7 +198,7 @@ def b12_market(c):
     rivals_trend = round(sum(trends) / len(trends), 1) if trends else None
     heads = [r["keyword"] for r in short if r["role"] == "main"][:5]
     by_country = {}
-    for cc in S.market_countries:
+    for cc in list(dict.fromkeys(S.market_countries + K("extra_countries"))):
         if cc == c.v["country"]:
             continue
         try:
@@ -257,7 +257,7 @@ def b13_links(c):
         s["top_pages"] = seo.top_pages(d, c.loc, c.lang, limit=10)
         s["free_tool_pages"] = [p["url"] for p in s["top_pages"] if any(w in (p["url"] or "").lower() for w in ("tool", "calculator", "checker", "free", "generator", "lookup"))]
         seo_rows.append(s)
-        refs[d] = seo.referring_domains(d, limit=300)
+        refs[d] = seo.referring_domains(d, limit=K("ref_limit"))
     links = defaultdict(lambda: {"dr": 0, "competitors": []})
     comp_set = {x["domain"] for x in comps}
     for d, lst in refs.items():
@@ -304,8 +304,9 @@ def _mentioned(domain, text_low, cited):
     return "-" not in b and len(b) >= 5 and re.search(r"%s" % re.escape(b), text_low) is not None
 
 
-def ai_visibility(c, comps, n_prompts=4):
+def ai_visibility(c, comps, n_prompts=None):
     """Do ChatGPT, Perplexity and Google's AI Overviews recommend the rivals, and which sites do they quote?"""
+    n_prompts = n_prompts or K("ai_prompts")
     clusters = c.read("10_clusters_serp.json")
     heads = [cl["head"] for cl in clusters if cl["intent"] in ("buy", "brand-model")][:n_prompts] or [cl["head"] for cl in clusters[:n_prompts]]
     prompts = [f"What is the best website or tool for {h}? Recommend specific sites." for h in heads]
@@ -372,12 +373,12 @@ def on_topic(keyword, phrases):
     return any(p <= ws for p in phrases) if phrases else True
 
 
-def keyword_gap(c, comps, n_rivals=3):
+def keyword_gap(c, comps, n_rivals=None):
     """Searches the top rivals rank for (page 1-2) that are on our topic but not in our keyword list."""
     ours = {k["keyword"] for k in read_csv(c.path("08_keywords_clean.csv"))}
     phrases = _topic_phrases(c)
     best = {}
-    for x in comps[:n_rivals]:
+    for x in comps[:n_rivals or K("gap_rivals")]:
         try:
             rows = seo.ranked_keywords(x["domain"], c.loc, c.lang, limit=100)
         except seo.DFSError:

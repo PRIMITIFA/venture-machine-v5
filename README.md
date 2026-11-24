@@ -22,6 +22,23 @@ PHASE 4  PLAN + GUARDRAILS    15 tools, costs, GUARDRAILS.md  16 unit economics 
 
 A real idea usually costs **$0.30-1.50** in DataForSEO calls. Phase 1 costs a few cents.
 
+## Three levels: quick, full, deep
+
+| Level | What it does | Time | Data cost |
+|---|---|---|---|
+| **Quick check** (`--depth light`) | Steps 01-04 and 06-09, with no stops: is the idea clear, does anyone pay, is the niche alive, real search numbers, 10 live Google results, keyword difficulty. Ends with a **quick score out of 100** over 6 checks and a short PDF. | ~5 min | ~$0.20 (cap $0.50) |
+| **Full check** (default) | All 18 steps and 3 decisions: rivals, AI assistants, market size, money, costs, plan. 60 live Google results. | ~30 min | ~$2-3 (cap $5) |
+| **Deep check** (`--depth deep`) | The full check, made bigger: 120 Google results, more countries, 8 AI questions, traffic history and keyword gap for all 5 rivals, 800 links per rival. | ~45 min | ~$4-7 (cap $10) |
+
+Start cheap and go deeper only on the ideas that score well:
+
+```bash
+python vm.py new "your idea" --depth light --run    # quick score in ~5 minutes
+python vm.py deepen <slug> full --run                # upgrade; re-uses everything already fetched
+```
+
+The quick score is out of 100: under 55 = skip it, 55-69 = maybe, 70+ = worth a full check. In the app, pick the level when you add an idea, and press **Run full check** or **Run deep check** after a quick one.
+
 ## What the findings PDF tells you
 
 A plain-language report anyone can read:
