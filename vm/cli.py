@@ -17,11 +17,14 @@ def cmd_run(a):
     st = pipeline.run(a.slug)
     p = report.write(a.slug)
     print(f"\nstatus: {st} | spent ${store.spent(a.slug):.2f} | report: {p}")
+    f, msg = pdf.write(a.slug)
+    print(f"findings PDF: {f}" if f else msg)
 
 
 def cmd_gate(a):
     print(pipeline.gate(a.slug, a.decision, " ".join(a.note)))
     report.write(a.slug)
+    pdf.write(a.slug)
 
 
 def cmd_list(a):

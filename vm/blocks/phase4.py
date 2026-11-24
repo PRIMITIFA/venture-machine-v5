@@ -256,7 +256,7 @@ swap the keyword in a template are not allowed.
         cal.append({"week": 2, "date": (start + dt.timedelta(weeks=1)).isoformat(), "type": "ai search", "item": a, "keyword": "", "kd": "", "data_source": ""})
     cal.sort(key=lambda r: (r["week"], r["type"]))
     write_csv(c.path("19_seo_calendar_90d.csv"), cal, ["week", "date", "type", "item", "keyword", "kd", "data_source"])
-    store.set_data(c.slug, advantage_score=out.advantage_score)
+    store.set_data(c.slug, advantage_score=out.advantage_score, advantage_reason=out.advantage_reason)
     c.write("19_business_plan.md", f"""# Business plan: {c.slug}
 **Why us (5 seconds):** {out.why_us_5_seconds}
 

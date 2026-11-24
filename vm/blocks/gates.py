@@ -68,15 +68,16 @@ def gate3_scores(c):
                 return s
         return 1
     kd_dr = round((band(easy, (0.6, 0.4, 0.25, 0.1)) + (5 if min_dr < 20 else 4 if min_dr < 40 else 3 if min_dr < 60 else 2 if min_dr < 75 else 1)) / 2)
+    adv_reason = (c.v["data"].get("advantage_reason") or "").strip()
     s = {
-        "demand": (band(buy_vol, (5000, 2000, 1000, 300)), f"buying volume {int(buy_vol)}/mo"),
-        "value": (band(max_cpc, (5, 3, 2, 1)), f"top buying CPC ${max_cpc:.2f}"),
-        "market": (band(ratio, (50, 20, 10, 3)), f"bottom-up = {ratio:.1f}x year-1 goal"),
-        "kd_dr": (kd_dr, f"{easy:.0%} of shortlist KD<=20; weakest competitor DR {min_dr:.0f}"),
-        "weak_spots": (band(weak, (0.5, 0.3, 0.2, 0.1)), f"{weak:.0%} of clusters have a weak spot"),
-        "advantage": (int(c.v["data"].get("advantage_score") or 3), "block 17 edge score"),
+        "demand": (band(buy_vol, (5000, 2000, 1000, 300)), f"{int(buy_vol):,} searches a month from people ready to buy (want 1,000+)"),
+        "value": (band(max_cpc, (5, 3, 2, 1)), f"advertisers pay up to ${max_cpc:.2f} per click (want $2+)"),
+        "market": (band(ratio, (50, 20, 10, 3)), f"the careful market guess is {ratio:.1f}x your first-year goal (want 10x+)"),
+        "kd_dr": (kd_dr, f"{easy:.0%} of the best searches are easy to rank for; weakest rival has strength {min_dr:.0f}/100"),
+        "weak_spots": (band(weak, (0.5, 0.3, 0.2, 0.1)), f"rivals are weak on {weak:.0%} of the page topics"),
+        "advantage": (int(c.v["data"].get("advantage_score") or 3), adv_reason[:200] or "how much better we can be than the rivals (AI judgement)"),
         "costs": (5 if cost_share <= 0.05 else 4 if cost_share <= 0.10 else 3 if cost_share <= 0.20 else 2 if cost_share <= 0.40 else 1,
-                  f"fixed ${fixed:.0f}/mo = {cost_share:.0%} of goal/month"),
+                  f"about ${fixed:.0f} a month to run, {cost_share:.0%} of your monthly goal"),
     }
     avg = round(sum(v[0] for v in s.values()) / len(s), 2)
     return s, avg

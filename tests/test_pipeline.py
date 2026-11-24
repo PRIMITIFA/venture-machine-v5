@@ -151,7 +151,8 @@ class Pipeline(unittest.TestCase):
         from vm import report, pdf
         self.assertTrue(report.write(slug).exists())
         h = pdf.build_html(slug)
-        for part in ("FINDINGS REPORT", "The checks, block by block", "Competitors", "Market size", "unit economics", "The plan", "Sources"):
+        for part in ("FINDINGS REPORT", "THE ANSWER", "The scorecard", "Is there demand?", "Who are you up against?",
+                     "How big is the money?", "Will it make money?", "The plan", "Glossary", "Sources", "IN PLAIN WORDS"):
             self.assertIn(part, h)
         f, msg = pdf.write(slug)  # a real PDF if a browser is installed, else a clear message
         self.assertTrue(f is None or f.stat().st_size > 1000, msg)

@@ -1,4 +1,7 @@
-"""Findings PDF: everything the machine found out about one idea, written to be read (not a status page).
+"""Findings PDF: what the machine found out about one idea, written so anyone can follow it.
+
+Order: the answer first (build / test / don't), then one plain question per section, each opening with an
+"In plain words" box, then the proof. Heavy tables go to the appendix. A glossary explains every term.
 
 Built as print-ready HTML, then turned into a PDF with Playwright if installed, otherwise with Chrome / Edge /
 Chromium in headless mode (already on most computers). Output: ventures/<slug>/<slug>-findings.pdf
@@ -13,27 +16,75 @@ import subprocess
 
 from . import store
 from .config import S
-from .pipeline import registry
-from .report import status_label
 from .util import num, read_csv
 
+INK, MUTE, LINE, SOFT = "#18181b", "#71717a", "#e4e4e7", "#f4f4f5"
+GOOD, CARE, BAD, INFO = "#16a34a", "#d97706", "#dc2626", "#2563eb"
+
 CSS = """
-@page{size:A4;margin:16mm 14mm 18mm}
+@page{size:A4;margin:14mm 14mm 16mm}
 *{box-sizing:border-box}html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-body{font:10pt/1.45 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#1c1917;margin:0}
-h1{font-size:22pt;line-height:1.2;margin:0 0 6pt}h2{font-size:14pt;margin:0 0 8pt;padding-bottom:4pt;border-bottom:2px solid #1c1917;break-before:page}
-h3{font-size:11pt;margin:14pt 0 5pt}p{margin:0 0 6pt}ul{margin:0 0 6pt;padding-left:16pt}li{margin:0 0 2pt}
-.mute{color:#78716c}.small{font-size:8.5pt}a{color:#1d4ed8;text-decoration:none;word-break:break-all}
-table{border-collapse:collapse;width:100%;margin:4pt 0 10pt;font-size:8.5pt}th,td{text-align:left;padding:3pt 5pt;border-bottom:1px solid #e7e5e4;vertical-align:top}
-th{background:#f5f5f4;font-weight:600}tr{break-inside:avoid}
-.cover{min-height:240mm;display:flex;flex-direction:column}.tag{font-size:9pt;letter-spacing:.04em;color:#78716c;margin-bottom:28pt}
-.verdict{border:2px solid #1c1917;border-radius:8pt;padding:12pt 14pt;margin:18pt 0}.verdict .big{font-size:18pt;font-weight:700}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8pt;margin:8pt 0 12pt}.kpi{border:1px solid #e7e5e4;border-radius:6pt;padding:7pt 9pt}
-.kpi .v{font-size:13pt;font-weight:700}.kpi .l{font-size:8pt;color:#78716c}
-.pass{color:#15803d;font-weight:600}.warn{color:#b45309;font-weight:600}.kill,.redo{color:#b91c1c;font-weight:600}
-.box{background:#fafaf9;border:1px solid #e7e5e4;border-radius:6pt;padding:8pt 10pt;margin:6pt 0 10pt}
+body{font:10.5pt/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:%(INK)s;margin:0}
+h1{font-size:20pt;line-height:1.15;margin:0 0 8pt;letter-spacing:-.01em}
+h2{font-size:17pt;line-height:1.2;margin:0 0 4pt;letter-spacing:-.01em}
+.sec{break-before:page}.sec .num{display:inline-block;font-size:9pt;font-weight:700;color:#fff;background:%(INK)s;border-radius:99px;padding:1pt 8pt;margin-bottom:6pt}
+h3{font-size:11.5pt;margin:14pt 0 5pt}p{margin:0 0 6pt}ul{margin:0 0 6pt;padding-left:15pt}li{margin:0 0 3pt}
+.mute{color:%(MUTE)s}.small{font-size:8.5pt}a{color:%(INFO)s;text-decoration:none;word-break:break-all}
+table{border-collapse:collapse;width:100%%;margin:4pt 0 10pt;font-size:9pt}th,td{text-align:left;padding:4pt 6pt;border-bottom:1px solid %(LINE)s;vertical-align:top}
+th{font-weight:600;color:%(MUTE)s;font-size:8pt;text-transform:none}tr{break-inside:avoid}td.n{text-align:right;white-space:nowrap}
+.plain{background:#eff6ff;border-left:4px solid %(INFO)s;border-radius:4pt;padding:9pt 12pt;margin:8pt 0 12pt;font-size:11pt}
+.plain b.t{display:block;font-size:8pt;letter-spacing:.06em;color:%(INFO)s;margin-bottom:2pt}
+.gap{background:#f0fdf4;border-left:4px solid %(GOOD)s;border-radius:4pt;padding:9pt 12pt;margin:8pt 0 12pt}
+.worry{background:#fffbeb;border-left:4px solid %(CARE)s;border-radius:4pt;padding:9pt 12pt;margin:8pt 0 12pt}
+.hero{border-radius:10pt;padding:16pt 18pt;margin:10pt 0 14pt;color:#fff}
+.hero .lbl{font-size:9pt;letter-spacing:.08em;opacity:.85}.hero .ans{font-size:26pt;font-weight:800;line-height:1.1;margin:2pt 0 6pt}
+.hero p{margin:0;font-size:11pt;opacity:.95}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8pt;margin:8pt 0 12pt}
+.kpi{border:1px solid %(LINE)s;border-radius:8pt;padding:9pt 10pt;break-inside:avoid}.kpi .v{font-size:15pt;font-weight:800}
+.kpi .l{font-size:9pt;font-weight:600;margin-top:1pt}.kpi .x{font-size:8pt;color:%(MUTE)s;margin-top:2pt;line-height:1.35}
+.pill{display:inline-block;border-radius:99px;padding:0 7pt;font-size:8pt;font-weight:700;color:#fff;white-space:nowrap}
+.score{display:grid;grid-template-columns:150pt 1fr 44pt;gap:8pt;align-items:center;padding:4pt 0;border-bottom:1px solid %(LINE)s;break-inside:avoid}
+.score .q{font-weight:600;font-size:10pt}.score .why{font-size:8.5pt;color:%(MUTE)s;grid-column:1/4;margin-top:-3pt}
+.bar{height:8pt;background:%(SOFT)s;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%%;border-radius:99px}
+.steps{counter-reset:s;list-style:none;padding:0}.steps li{counter-increment:s;padding-left:22pt;position:relative;margin-bottom:6pt}
+.steps li:before{content:counter(s);position:absolute;left:0;top:0;width:15pt;height:15pt;border-radius:99px;background:%(INK)s;color:#fff;font-size:8pt;font-weight:700;text-align:center;line-height:15pt}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12pt}.two>div{break-inside:avoid}
+.card{border:1px solid %(LINE)s;border-radius:8pt;padding:9pt 11pt;margin:0 0 8pt;break-inside:avoid}
+.card h4{margin:0 0 3pt;font-size:10.5pt}
+.tl{display:grid;grid-template-columns:repeat(6,1fr);gap:4pt;margin:6pt 0 12pt}.tl div{border-top:3px solid %(INK)s;padding-top:4pt;font-size:8.5pt}
+.tl b{display:block;font-size:9pt}
 pre{white-space:pre-wrap;font:8.5pt/1.45 Consolas,ui-monospace,monospace;margin:0}
-"""
+.foot{font-size:8pt;color:%(MUTE)s;margin-top:14pt}
+""" % dict(INK=INK, MUTE=MUTE, LINE=LINE, SOFT=SOFT, GOOD=GOOD, CARE=CARE, BAD=BAD, INFO=INFO)
+
+STEP_NAMES = {
+    "01": "Is the idea clear?", "02": "Does anyone already pay for this?", "03": "Is the market alive?",
+    "04": "Is it worth the effort?", "05": "Your decision #1", "06": "Brainstorm search words",
+    "07": "How many people search?", "08": "What does Google show?", "09": "Pick the best keywords and rivals",
+    "10": "How good are the rival websites?", "11": "What do rivals charge?", "12": "How big is the market?",
+    "13": "How strong is the rivals' SEO?", "14": "Your decision #2", "15": "Costs and safety rules",
+    "16": "Does the money work?", "17": "The build plan", "18": "Your decision #3",
+}
+
+GLOSSARY = [
+    ("CPC (cost per click)", "What advertisers pay Google each time someone clicks their ad. A high CPC means buyers for this are worth money."),
+    ("KD (keyword difficulty, 0-100)", "How hard it is to get on Google's first page for a search. Under 20 is easy for a new site; over 50 is very hard."),
+    ("DR (domain rating, 0-100)", "How strong a website is in Google's eyes, mostly from how many sites link to it. Under 30 is beatable."),
+    ("SERP", "The Google results page for a search."),
+    ("Cluster", "A group of searches that Google answers with the same pages. One cluster = one page to build."),
+    ("Buying intent", "A search from someone ready to pay (\"passport photo online\"), not just curious (\"what size is a passport photo\")."),
+    ("ICE score (1-10)", "Impact x Confidence x Ease, averaged. A quick gut-check of how worth it an idea is. 6+ is good."),
+    ("MVP", "Minimum viable product: the simplest version people can pay for."),
+    ("CAC (customer acquisition cost)", "What it costs to win one paying customer (ads, emails, time)."),
+    ("Max CAC", "The most you can spend to win a customer and still not lose money."),
+    ("Net per sale", "What you keep from one sale after data costs and payment fees."),
+    ("Bottom-up market", "Estimate built from real search numbers: clicks the top sites get x a share who buy x price."),
+    ("Top-down market", "Estimate built from the size of the whole industry. Always bigger; you will not get all of it."),
+    ("E-E-A-T", "Experience, Expertise, Authority, Trust: what Google checks before it trusts a site with a topic."),
+    ("YMYL", "\"Your money or your life\": topics like health, money or law where Google is extra strict."),
+    ("Link target", "A website that links to your competitors and might link to you too. Links make your site stronger."),
+    ("Gate", "A point where the machine stops and you decide: go on, change direction, or stop."),
+]
 
 
 def e(x):
@@ -42,26 +93,69 @@ def e(x):
 
 def link(u, text=None):
     u = str(u or "")
-    return f'<a href="{e(u)}">{e(text or u)}</a>' if u.startswith("http") else e(text or u)
+    return '<a href="%s">%s</a>' % (e(u), e(text or u)) if u.startswith("http") else e(text or u)
 
 
 def money(x):
-    return f"${num(x):,.0f}" if num(x) >= 100 else f"${num(x):,.2f}"
+    x = num(x)
+    if x >= 1e9:
+        return "$%.1fB" % (x / 1e9)
+    if x >= 1e6:
+        return "$%.1fM" % (x / 1e6)
+    return "$%s" % format(round(x), ",") if x >= 100 else "$%.2f" % x
 
 
-def table(rows, cols, heads=None, limit=None):
+def pill(text, color):
+    return '<span class=pill style="background:%s">%s</span>' % (color, e(text))
+
+
+def kd_word(kd):
+    if kd in ("", None):
+        return pill("unknown", MUTE)
+    k = num(kd)
+    return pill("very easy", GOOD) if k <= 10 else pill("easy", GOOD) if k <= 30 else pill("medium", CARE) if k <= 50 else pill("hard", BAD)
+
+
+def dr_word(dr):
+    if dr in ("", None):
+        return pill("unknown", MUTE)
+    d = num(dr)
+    return pill("weak", GOOD) if d < 20 else pill("beatable", GOOD) if d < 40 else pill("strong", CARE) if d < 60 else pill("very strong", BAD)
+
+
+def table(rows, cols, heads=None, limit=None, raw=(), right=()):
     rows = rows[:limit] if limit else rows
     if not rows:
-        return "<p class=mute>none</p>"
-    h = "<table><tr>" + "".join(f"<th>{e(c)}</th>" for c in (heads or cols)) + "</tr>"
+        return "<p class=mute>Nothing found.</p>"
+    h = "<table><tr>" + "".join("<th>%s</th>" % e(c) for c in (heads or cols)) + "</tr>"
     for r in rows:
-        h += "<tr>" + "".join(f"<td>{r.get(c, '') if str(r.get(c, '')).startswith('<a ') else e(r.get(c, ''))}</td>" for c in cols) + "</tr>"
+        cells = []
+        for c in cols:
+            v = r.get(c, "")
+            txt = str(v) if c in raw else e(v)
+            cells.append(("<td class=n>%s</td>" if c in right else "<td>%s</td>") % txt)
+        h += "<tr>" + "".join(cells) + "</tr>"
     return h + "</table>"
 
 
-def bullets(xs):
+def bullets(xs, cls=""):
     xs = [x for x in (xs or []) if x]
-    return "<ul>" + "".join(f"<li>{link(x) if str(x).startswith('http') else e(x)}</li>" for x in xs) + "</ul>" if xs else "<p class=mute>none</p>"
+    if not xs:
+        return "<p class=mute>Nothing found.</p>"
+    return "<ul%s>" % (' class="%s"' % cls if cls else "") + "".join(
+        "<li>%s</li>" % (link(x) if str(x).startswith("http") else e(x)) for x in xs) + "</ul>"
+
+
+def plain(text):
+    return "<div class=plain><b class=t>IN PLAIN WORDS</b>%s</div>" % text
+
+
+def first_sentence(t, n=220):
+    t = re.sub(r"\s+", " ", str(t or "")).strip()
+    m = re.match(r"(.+?[.;])(\s|$)", t)
+    t = m.group(1) if m and len(m.group(1)) > 40 else t
+    t = t.rstrip(";, ")
+    return t if len(t) <= n else t[:n].rsplit(" ", 1)[0] + "..."
 
 
 def md(text):
@@ -114,9 +208,40 @@ def urls_in(obj, acc):
                 acc.setdefault(u.rstrip(".,;"), None)
 
 
+QUESTIONS = {
+    "demand": "Do people search for it?", "value": "Are buyers worth money?", "market": "Is the market big enough?",
+    "kd_dr": "Can a new site get onto Google?", "weak_spots": "Are the rivals weak anywhere?", "advantage": "Do we have an edge?",
+    "costs": "Is it cheap to run?",
+}
+
+
+def answer_of(v, data, n_done):
+    st, rec = v["status"], data.get("gate3_recommendation") or ""
+    if st == "killed":
+        return "DON'T BUILD IT", BAD, "You stopped this idea. It stays in the archive so it is never suggested again."
+    if st == "kill_recommended":
+        return "STOP: A DEAL-BREAKER", BAD, "One of the checks found a problem big enough to stop. See 'Things to worry about'."
+    if st == "alert":
+        return "STUCK", CARE, "A step could not finish (for example the money cap was reached). See the step list at the back."
+    if st == "approved_build":
+        return "BUILD IT", GOOD, "You approved this idea for building."
+    if st == "quick_test":
+        return "TEST IT CHEAPLY FIRST", CARE, "You chose a small, capped test before building. The test plan is below."
+    if rec.startswith("FULL"):
+        return "LOOKS GOOD: BUILD IT", GOOD, "It scored %s out of 5 on the 7 checks that matter most." % data.get("gate3_score")
+    if rec.startswith("QUICK"):
+        return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %s out of 5. Not clear enough to build; run a small capped test first." % data.get("gate3_score")
+    if rec.startswith("KILL"):
+        return "DON'T BUILD IT", BAD, "It scored only %s out of 5 on the 7 checks that matter most." % data.get("gate3_score")
+    return "NOT FINISHED YET", "#52525b", "The machine has done %d of 18 steps so far. Run it again to continue." % n_done
+
+
 def build_html(slug):
+    from .blocks.gates import gate3_scores
+    from .pipeline import Ctx
     v = store.venture(slug)
     d = S.ventures_dir / slug
+    data = v["data"]
 
     def jf(name):
         p = d / name
@@ -134,186 +259,283 @@ def build_html(slug):
     sc, how, eeat, pulse = jf("05_scorecard.json"), jf("02_how_analysis.json"), jf("03_eeat_quality.json"), jf("04_niche_pulse.json")
     kws, short, clusters, comps = cf("08_keywords_clean.csv"), cf("11_shortlist.csv"), jf("10_clusters_serp.json"), jf("11_top_competitors.json")
     ux, biz, mk, seo_, links = jf("12_competitor_ux.json"), jf("13_competitor_business.json"), jf("14_market_analysis.json"), jf("15_competitor_seo.json"), cf("15_link_targets.csv")
-    costs, ue = jf("15_costs.json"), jf("16_unit_economics.json")
-    data = v["data"]
-    H = []
-
-    # ---------- cover ----------
-    rec = data.get("gate3_recommendation")
+    costs, ue, plan = jf("15_costs.json"), jf("16_unit_economics.json"), jf("19_sitemap.json")
+    n_done = sum(1 for b in bl.values() if b["status"] == "VALIDATED")
     decisions = store.gates(slug)
-    last = decisions[-1] if decisions else None
-    verdict = (f"Gate 3 score {data.get('gate3_score')}/5: <b>{e(rec)}</b>" if rec else
-               "Research stopped before gate 3" if v["status"] in ("killed", "kill_recommended", "alert") else "Research in progress")
+    H = []
+    sec = [0]
+
+    def section(title, sub=""):
+        sec[0] += 1
+        H.append("<div class=sec><span class=num>PART %d</span><h2>%s</h2>%s" % (sec[0], e(title), "<p class=mute>%s</p>" % e(sub) if sub else ""))
+
+    def end():
+        H.append("</div>")
+
+    # ================= PAGE 1: THE ANSWER =================
+    ans, color, why = answer_of(v, data, n_done)
+    overridden = [g for g in decisions if g["decision"] == "override"]
+    if color == GOOD and overridden:
+        ans, color = "GOOD NUMBERS, BUT A STOP WAS SKIPPED", CARE
+        why += " But you skipped a stop at step %s. Read 'Things to worry about' before building." % ", ".join(sorted({g["gate"] for g in overridden}))
     buy = [k for k in (kws or []) if k["intent"] in ("buy", "competitor", "brand-model")]
+    buy_vol = int(sum(num(k["volume"]) for k in buy))
+    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; FINDINGS REPORT &middot; %s</div>" % e(store.now()[:10]))
+    H.append("<h1>%s</h1>" % e(v["one_liner"] or v["idea"]))
+    H.append("<p class=mute>Checked for: %s &middot; Language: %s &middot; Steps done: %d of 18 &middot; Data bought: %s</p>"
+             % (e(v["country"].upper()), e(v["lang"]), n_done, money(store.spent(slug))))
+    H.append("<div class=hero style='background:%s'><div class=lbl>THE ANSWER</div><div class=ans>%s</div><p>%s</p></div>" % (color, e(ans), e(why)))
+    if sc:
+        H.append("<h3>Why, in three sentences</h3>" + bullets(sc["summary_3_lines"]))
     kpis = []
     if buy:
-        kpis += [(f"{int(sum(num(k['volume']) for k in buy)):,}/mo", "buying-intent searches"), (money(max(num(k['cpc']) for k in buy)), "top buying CPC")]
+        top_cpc = max(num(k["cpc"]) for k in buy)
+        kpis.append(("{:,}".format(buy_vol), "searches a month", "from people who look ready to buy (Google data)"))
+        kpis.append((money(top_cpc), "price of one ad click", "advertisers pay this per click; high = buyers are worth money"))
     if mk:
-        kpis += [(money(mk["bottom_up_usd_year"]) + "/yr", "market, bottom-up"), (money(mk["top_down_usd_year"]) + "/yr", "market, top-down")]
+        kpis.append((money(mk["bottom_up_usd_year"]) + "/yr", "careful market size", "what the top sites can earn from these searches"))
     if seo_:
         drs = [num(s["dr"], 100) for s in seo_["competitors"] if s.get("dr") is not None]
         if drs:
-            kpis.append((f"DR {min(drs):.0f}", "weakest top-5 competitor"))
-    if links is not None:
-        kpis.append((str(len(links)), "link targets"))
-    if sc:
-        kpis += [(str(sc["ice_avg"]), "ICE score (of 10)"), (f"{sc['effort']['days_to_mvp']} days", "to an MVP")]
+            kpis.append(("%d / 100" % min(drs), "weakest rival's strength", "under 30 means a new site can beat it"))
     if data.get("unit_economics"):
-        kpis.append((money(data["unit_economics"].get("net_per_sale")), "net per sale"))
-    kpi_html = "".join("<div class=kpi><div class=v>%s</div><div class=l>%s</div></div>" % (e(a), e(b)) for a, b in kpis)
-    last_html = ("<p class=small>Last owner decision: gate %s %s %s</p>" % (e(last["gate"]), e(last["decision"].upper()), e(last["note"]))) if last else ""
-    pivot_html = ("<p class=small><b>Pivot:</b> %s</p>" % e(v["pivot_note"])) if v.get("pivot_note") else ""
-    three = ("<h3>In three lines</h3>" + bullets(sc["summary_3_lines"])) if sc else ""
-    H.append("<section class=cover><div class=tag>THE VENTURE MACHINE &middot; FINDINGS REPORT</div>"
-             + "<h1>%s</h1>" % e(v["one_liner"] or v["idea"])
-             + "<p class=mute>Idea: %s<br>Market: %s / %s &middot; Started %s &middot; Report %s</p>" % (e(v["idea"]), e(v["country"].upper()), e(v["lang"]), e(v["created"][:10]), e(store.now()[:16]))
-             + "<div class=verdict><div class=mute>Where it stands</div><div class=big>%s</div><p style='margin:4pt 0 0'>%s</p>%s%s</div>" % (e(status_label(v["status"])), verdict, last_html, pivot_html)
-             + "<div class=grid>%s</div>%s" % (kpi_html, three)
-             + "<p class='small mute' style='margin-top:auto'>Every number comes from DataForSEO or a page the AI opened (sources at the end). "
-             + "Figures marked ASSUMPTION are not measured. Paid data spent on this idea: %s.</p></section>" % money(store.spent(slug)))
-
-    # ---------- checks ----------
-    rows = []
-    for b in registry():
-        st = bl.get(b.id)
-        if not st:
-            continue
-        verd = st.get("verdict") or st["status"].lower()
-        rows.append(f"<tr><td>{b.id}</td><td>{e(b.name)}</td><td class='{e(verd)}'>{e(verd.upper())}</td><td>{e((st.get('summary') or st.get('error') or '')[:400])}</td></tr>")
-    H.append("<h2>1. The checks, block by block</h2><table><tr><th>#</th><th>Block</th><th>Result</th><th>What it found</th></tr>" + "".join(rows) + "</table>")
-
-    # ---------- idea ----------
-    if how:
-        cp = [{"name": c["name"], "price": c["price"], "model": c["pricing_model"], "source": link(c["source_url"], "source")} for c in how["competitors"]]
-        H.append("<h2>2. The business</h2><h3>Who already charges money</h3>" + table(cp, ["name", "price", "model", "source"]) +
-                 f"<h3>How it makes money</h3>{bullets(how['revenue_models'])}<h3>Where the data comes from</h3>" +
-                 table([{"name": s["name"], "type": s["type"], "url": link(s.get("url"), "link") if s.get("url") else "", "cost": s.get("cost_note", "")} for s in how["data_sources"]], ["name", "type", "url", "cost"]) +
-                 f"<div class=box><b>The one question that decides it:</b> {e(how['validation_question'])}</div>")
-        if eeat:
-            er = [{"check": k.replace("_", " "), "ok": "yes" if eeat[k]["ok"] else "NO", "answer": eeat[k]["answer"]}
-                  for k in ("real_person_or_company", "expertise_proof", "unique_data_per_page", "contacts_policies_real_example")]
-            H.append(f"<h3>Google quality (E-E-A-T)</h3>{table(er, ['check', 'ok', 'answer'])}<p>YMYL risk: <b>{e(eeat['ymyl_level'])}</b>. Never claim:</p>{bullets(eeat.get('ymyl_banned_claims'))}")
-    if pulse:
-        tr = [{"term": t, "change_24m": f"{x['change_24m_pct']}%" if x["change_24m_pct"] is not None else "n/a"} for t, x in pulse.get("trend", {}).items()]
-        H.append(f"<h3>Is the niche alive? <span class='{'kill' if pulse['status'] == 'dying' else 'pass' if pulse['status'] == 'alive' else 'warn'}'>{e(pulse['status'].upper())}</span></h3>"
-                 f"{table(tr, ['term', 'change_24m'], ['search term', '24-month change (Google Trends)'])}"
-                 f"<p>Ads on the top term: {e(pulse.get('ads_on_top_term'))} {e(', '.join(pulse.get('advertisers') or []))}</p>"
-                 f"<p><b>Rising synonyms:</b> {e(', '.join(pulse.get('rising_synonyms') or []) or 'none')}</p>"
-                 f"<p><b>New players (12 months):</b></p>{bullets(pulse.get('new_competitors_12m'))}<p><b>Fresh discussions (90 days):</b></p>{bullets(pulse.get('fresh_discussions_90d'))}")
+        kpis.append((money(data["unit_economics"].get("net_per_sale")), "you keep per sale", "after data costs and payment fees"))
     if sc:
-        H.append(f"<h3>For and against</h3><table><tr><th>For</th><th>Against</th></tr>" +
-                 "".join(f"<tr><td>{e(a)}</td><td>{e(b)}</td></tr>" for a, b in zip(sc["pros"], sc["cons"])) + "</table>"
-                 f"<p><b>Biggest unknown:</b> {e(sc['biggest_unknown'])}</p>"
-                 f"<p><b>Effort:</b> {sc['effort']['days_to_mvp']} days to MVP, about {money(sc['effort']['monthly_cost_usd'])}/month, {sc['effort']['owner_hours_per_week']} owner hours/week. "
-                 f"APIs: {e(', '.join(sc['effort']['api_dependencies']))}</p><p><b>ICE:</b> impact {sc['ice']['impact']}, confidence {sc['ice']['confidence']}, ease {sc['ice']['ease']} = {sc['ice_avg']}</p>"
-                 f"<p><b>Synergy:</b> {e(sc['synergy'])}</p>" + (f"<p><b>Risks:</b></p>{bullets(sc.get('risks'))}" if sc.get("risks") else ""))
+        kpis.append(("%s days" % sc["effort"]["days_to_mvp"], "to a first version", "time to build something people can pay for"))
+    if kpis:
+        H.append("<div class=kpis>" + "".join("<div class=kpi><div class=v>%s</div><div class=l>%s</div><div class=x>%s</div></div>" % (e(a), e(b), e(c)) for a, b, c in kpis) + "</div>")
+    H.append("<p class=foot>How to read this: Part 1 is the scorecard and what to do next. Each later part answers one plain question "
+             "and starts with a blue \"in plain words\" box. Every number comes from Google data (via DataForSEO) or a web page the AI opened; "
+             "sources are listed at the back. Words like CPC or KD are explained in the glossary at the end.</p>")
 
-    # ---------- demand ----------
-    if short:
-        H.append("<h2>3. Demand: what people search for</h2>"
-                 f"<p>{len(kws or [])} real keywords after cleaning (Google Ads data, {e(v['country'].upper())}). "
-                 "Score = volume x max(CPC, 0.30) x intent weight / (KD + 5).</p><h3>Shortlist</h3>" +
-                 table(short, ["role", "keyword", "volume", "cpc", "intent", "kd", "trend12", "score"],
-                       ["role", "keyword", "searches/mo", "CPC $", "intent", "KD", "12-mo trend %", "score"], 45))
-    if clusters:
-        cr = [{"head": c["head"], "kws": len(c["keywords"]), "volume": int(c["volume"]), "intent": c["intent"], "kd": c.get("kd", ""),
-               "format": c["winning_format"], "weak": "; ".join(c["weak_spots"]) or ("better format possible" if c.get("better_format_possible") else "")} for c in clusters]
-        H.append("<h3>Topic clusters (1 cluster = 1 page)</h3>" + table(cr, ["head", "kws", "volume", "intent", "kd", "format", "weak"],
-                                                                     ["main keyword", "keywords", "searches/mo", "intent", "KD", "what ranks", "weak spots"], 25))
+    # ================= PART 1: SCORECARD + WORRIES + NEXT =================
+    section("The scorecard", "The 7 things that decide if this idea is worth building, each scored 1 to 5.")
+    try:
+        scores, avg = gate3_scores(Ctx(slug)) if comps and mk and seo_ and clusters else (None, None)
+    except Exception:
+        scores, avg = None, None
+    if scores:
+        H.append(plain("Overall <b>%s out of 5</b>. Below 3 means don't build. 3 to 3.5 means run a cheap test first. 3.5 or more means build." % avg))
+        for k, (val, why_) in scores.items():
+            col = GOOD if val >= 4 else CARE if val == 3 else BAD
+            H.append("<div class=score><div class=q>%s</div><div class=bar><i style='width:%d%%;background:%s'></i></div><div><b>%d</b>/5</div><div class=why>%s</div></div>"
+                     % (e(QUESTIONS.get(k, k)), val * 20, col, val, e(why_)))
+    else:
+        H.append(plain("The scorecard appears once all research steps are done (step 18). So far %d of 18 steps are done." % n_done))
+    worries = ["You skipped a stop at step %s (%s). Your reason: \"%s\"" % (g["gate"], STEP_NAMES.get(g["gate"], ""), g["note"]) for g in overridden]
+    uec = (ue or {}).get("chosen") or {}
+    for bid in sorted(bl):
+        st = bl[bid]
+        if st.get("verdict") not in ("warn", "kill") or bid in ("05", "14", "18"):
+            continue
+        summ = re.sub(r"\s*\|\s*OWNER OVERRIDE:.*$", "", st.get("summary") or "")
+        if bid == "04" and sc:
+            w = "The quick gut-check score is only %s out of 10 (6 or more is good)." % sc["ice_avg"]
+        elif bid == "12" and mk:
+            w = "The careful market guess (%s a year) is only %.1f times your first-year goal; we want 10 times or more." % (money(mk["bottom_up_usd_year"]), mk["bottom_up_usd_year"] / max(mk["year1_goal_usd"], 1))
+        elif bid == "16" and uec.get("paid_search_cac") and uec["paid_search_cac"] > uec.get("max_cac", 0):
+            w = "Paid ads would lose money: one customer from Google ads costs about %s, but you keep only %s per sale. Use free channels (Google search results, email)." % (money(uec["paid_search_cac"]), money(uec["net_per_sale"]))
+        else:
+            w = "%s %s" % (STEP_NAMES.get(bid, bid) + ":", first_sentence(summ))
+        worries.append(w)
+    if sc and sc.get("risks"):
+        worries += [first_sentence(r) for r in sc["risks"][:3]]
+    H.append("<h3>Things to worry about</h3>")
+    H.append("<div class=worry>%s</div>" % bullets(worries) if worries else "<p>Nothing serious was flagged.</p>")
+    H.append("<h3>What to do next</h3>")
+    st = v["status"]
+    nxt = []
+    if st.startswith("gate_"):
+        g = {"gate_05": ("#1", "GO starts the paid keyword research (about $0.50-1.50). KILL archives the idea."),
+             "gate_14": ("#2", "GO goes on to costs and the plan. PIVOT narrows the idea (one country, businesses only, a smaller group) and redoes the research. KILL archives it."),
+             "gate_18": ("#3", "GO approves building it. TEST runs a small capped test first. KILL archives it.")}[st]
+        nxt += ["Read this report (start with Part 1 and the worries above).", "Make decision %s in the app or with: vm gate %s go | kill%s" % (g[0], slug, " | pivot \"...\"" if st == "gate_14" else " | test" if st == "gate_18" else ""), g[1]]
+        if st == "gate_18" and costs and costs.get("owner_questions"):
+            nxt += ["Answer this first: " + first_sentence(q, 200) for q in costs["owner_questions"][:3]]
+    elif st == "approved_build" and costs:
+        nxt += ["%s (about %s min): %s" % (t["task"], t["minutes"], t["why"]) for t in costs["owner_todo"][:6]]
+    elif st == "quick_test" and tf("20_quick_test.md"):
+        nxt.append("Run the quick test in Part 7. Stop the moment the kill line is hit.")
+    elif st in ("kill_recommended", "alert"):
+        nxt += ["Read the worries above.", "Agree and stop: vm gate %s kill" % slug, "Or continue anyway with a reason: vm gate %s override \"why\"" % slug]
+    elif st == "killed":
+        nxt.append("Nothing. Try the next idea.")
+    else:
+        nxt.append("Run it again to continue: vm run %s" % slug)
+    H.append("<ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in nxt) + "</ol>")
+    end()
 
-    # ---------- competitors ----------
-    if comps:
+    # ================= PART 2: DEMAND =================
+    if short or pulse:
+        section("Is there demand?", "Do enough people search Google for this, and is that growing or shrinking?")
+        if short:
+            top = max(short, key=lambda r: num(r["volume"]))
+            easy = sum(1 for r in short if r["kd"] != "" and num(r["kd"]) <= 20)
+            H.append(plain("About <b>{:,}</b> searches a month come from people who look ready to buy. The biggest single search is "
+                           "<b>\"{}\"</b> ({:,} a month). <b>{} of the {}</b> best searches are easy for a brand-new site to rank for."
+                           .format(buy_vol, e(top["keyword"]), int(num(top["volume"])), easy, len(short))))
+            rows = [{"kw": r["keyword"], "vol": "{:,}".format(int(num(r["volume"]))), "cpc": money(r["cpc"]), "kd": kd_word(r["kd"]),
+                     "who": {"buy": "ready to buy", "competitor": "looking at a rival", "brand-model": "wants a specific thing", "info": "just learning"}.get(r["intent"], r["intent"])}
+                    for r in sorted(short, key=lambda r: -num(r["score"]))[:15]]
+            H.append("<h3>The best searches to go after</h3>" + table(rows, ["kw", "vol", "cpc", "kd", "who"],
+                                                                      ["What people type into Google", "Searches a month", "Ad click price", "How hard to rank", "Who is searching"],
+                                                                      raw=("kd",), right=("vol", "cpc")))
+        if pulse:
+            word = {"alive": ("alive", GOOD, "People still search for this and new sites keep appearing."),
+                    "flat": ("flat", CARE, "Interest is not growing, but it is not dying either."),
+                    "dying": ("dying", BAD, "Fewer people search for this every year.")}[pulse["status"]]
+            H.append("<h3>Is it growing? %s</h3><p>%s</p>" % (pill(word[0], word[1]), e(word[2])))
+            tr = [{"t": t, "c": ("%+.0f%%" % x["change_24m_pct"]) if x["change_24m_pct"] is not None else "not enough data"} for t, x in pulse.get("trend", {}).items()]
+            H.append(table(tr, ["t", "c"], ["Search term", "Change over the last 2 years (Google Trends)"], right=("c",)))
+            if pulse.get("rising_synonyms"):
+                H.append("<p><b>Newer words people now use:</b> %s</p>" % e(", ".join(pulse["rising_synonyms"])))
+        end()
+
+    # ================= PART 3: RIVALS =================
+    if comps or how:
+        section("Who are you up against?", "The sites that already sell this, what they charge, and where they are weak.")
         dr = {s["domain"]: s for s in (seo_ or {}).get("competitors", [])}
         uxd = {x["domain"]: x for x in (ux or {}).get("competitors", [])}
-        rows = [{"domain": c["domain"], "dr": dr.get(c["domain"], {}).get("dr", c.get("dr")), "rd": dr.get(c["domain"], {}).get("referring_domains", ""),
-                 "serps": c["serps"], "checkout": ", ".join(uxd.get(c["domain"], {}).get("checkout_provider") or []),
-                 "sitemap": uxd.get(c["domain"], {}).get("sitemap_urls") or "-"} for c in comps]
-        H.append("<h2>4. Competitors</h2><p>The real top 5, picked by how often and how high they rank across all our searches (big platforms and government sites left out).</p>" +
-                 table(rows, ["domain", "dr", "rd", "serps", "checkout", "sitemap"], ["site", "DR", "linking sites", "in # SERPs", "checkout", "pages"]))
-        for x in (ux or {}).get("competitors", []):
-            H.append(f"<h3>{e(x['domain'])}</h3><table><tr><th>Weak spots</th><th>Strong spots</th></tr><tr><td>{bullets(x.get('weaknesses'))}</td><td>{bullets(x.get('strengths'))}</td></tr></table>")
-    if biz:
-        plans = [{"site": x["domain"], "plan": p["name"], "price": p["price"], "billing": p["billing"]} for x in biz["competitors"] for p in x["plans"]]
-        H.append("<h3>Their prices</h3>" + table(plans, ["site", "plan", "price", "billing"]) +
-                 f"<div class=box><b>The gap we can own:</b> {e(biz['identified_gap'])}</div>")
-        ads = [{"site": dom, "keyword": a["keyword"], "ad": f"{a['title']} - {a['description']}"} for dom, lst in (biz.get("google_ads_in_serps") or {}).items() for a in lst[:4]]
-        if ads:
-            H.append("<h3>Google ads running on our keywords</h3>" + table(ads, ["site", "keyword", "ad"], limit=20))
-        if biz.get("long_running_ads"):
-            H.append("<h3>Ads running 30+ days</h3>" + bullets(biz["long_running_ads"]))
-        if biz.get("audience_quotes"):
-            H.append("<h3>What buyers say</h3><ul>" + "".join(f"<li>&ldquo;{e(q['quote'])}&rdquo; {link(q['url'], 'source')}</li>" for q in biz["audience_quotes"]) + "</ul>")
+        plans = {x["domain"]: [p for p in x["plans"] if p["price"] and "unknown" not in p["price"].lower()] for x in (biz or {}).get("competitors", [])}
+        if comps:
+            drs = [num(dr[c["domain"]]["dr"]) for c in comps if c["domain"] in dr and dr[c["domain"]].get("dr") is not None]
+            weakest = min(drs) if drs else None
+            H.append(plain("These <b>%d sites</b> show up most often on Google for these searches. %s Below: what each one charges and where it is weak."
+                           % (len(comps), ("The weakest has a strength of <b>%d out of 100</b>, which a new site can beat." % weakest) if weakest is not None and weakest < 40
+                              else ("Even the weakest has a strength of <b>%d out of 100</b>, so getting onto Google will take time." % weakest) if weakest is not None else "")))
+            for c in comps:
+                s = dr.get(c["domain"], {})
+                u = uxd.get(c["domain"], {})
+                pr = ", ".join("%s %s" % (p["name"][:40], p["price"]) for p in plans.get(c["domain"], [])[:2]) or "price not found"
+                H.append("<div class=card><h4>%s &nbsp;%s <span class=mute style='font-weight:400;font-size:8.5pt'>strength %s/100 &middot; %s sites link to it</span></h4>"
+                         "<p class=small><b>Charges:</b> %s</p><div class=two><div><b class=small>Weak at</b>%s</div><div><b class=small>Good at</b>%s</div></div></div>"
+                         % (e(c["domain"]), dr_word(s.get("dr", c.get("dr"))), e(s.get("dr", c.get("dr"))), e(s.get("referring_domains", "?")), e(pr),
+                            bullets([first_sentence(w, 160) for w in (u.get("weaknesses") or [])[:3]]), bullets([first_sentence(w, 160) for w in (u.get("strengths") or [])[:2]])))
+        if biz:
+            H.append("<div class=gap><b>THE GAP YOU CAN OWN</b><br>%s</div>" % e(biz["identified_gap"]))
+        if how:
+            cp = [{"n": c["name"], "p": c["price"], "s": link(c["source_url"], "see page")} for c in how["competitors"]]
+            H.append("<h3>Others already charging for this</h3>" + table(cp, ["n", "p", "s"], ["Who", "What they charge", "Proof"], raw=("s",)))
+        if biz and biz.get("audience_quotes"):
+            H.append("<h3>What buyers say (real quotes)</h3><ul>" + "".join("<li>&ldquo;%s&rdquo; %s</li>" % (e(q["quote"]), link(q["url"], "source")) for q in biz["audience_quotes"][:8]) + "</ul>")
+        end()
 
-    # ---------- market ----------
+    # ================= PART 4: MARKET =================
     if mk:
-        country_rows = [{"country": k.upper(), "searches": val} for k, val in mk.get("search_volume_by_country", {}).items()]
-        differ = "<p class=warn>The two methods differ by more than 10x.</p>" if mk.get("methods_differ_10x") else ""
-        H.append("<h2>5. Market size</h2><div class=grid>"
-                 + "<div class=kpi><div class=v>%s/yr</div><div class=l>bottom-up</div></div>" % money(mk["bottom_up_usd_year"])
-                 + "<div class=kpi><div class=v>%s/yr</div><div class=l>top-down</div></div>" % money(mk["top_down_usd_year"])
-                 + "<div class=kpi><div class=v>%s</div><div class=l>year-1 goal</div></div></div>" % money(mk["year1_goal_usd"])
-                 + "<p><b>Bottom-up:</b> %s</p><p><b>Top-down:</b> %s</p>" % (e(mk["bottom_up_method"]), e(mk["top_down_method"]))
-                 + bullets(mk.get("top_down_sources")) + differ
-                 + "<h3>Searches by country (main keywords)</h3>" + table(country_rows, ["country", "searches"])
-                 + "<h3>Buyer segments</h3>" + "".join(f"<p><b>{e(s['name'])}</b>{' (underserved)' if s['underserved'] else ''}: {e(s['size_note'])}</p>" +
-                                    ("<ul>" + "".join(f"<li>&ldquo;{e(q['quote'])}&rdquo; {link(q['url'], 'source')}</li>" for q in s["pain_quotes"]) + "</ul>" if s["pain_quotes"] else "")
-                                    for s in mk.get("segments", [])) +
-                 f"<h3>Underserved</h3>{bullets(mk.get('underserved_countries_or_segments'))}<p><b>Growth:</b> {e(mk.get('growth_direction'))}: {e(mk.get('growth_evidence'))}</p>")
-    if seo_:
-        H.append("<h2>6. SEO strength and links</h2>" + table(
-            [{"site": s["domain"], "dr": s["dr"], "rd": s["referring_domains"], "bl": s["backlinks"], "tools": ", ".join(s.get("free_tool_pages") or [])[:200]} for s in seo_["competitors"]],
-            ["site", "dr", "rd", "bl", "tools"], ["site", "DR", "linking sites", "backlinks", "free-tool pages"]))
-        for s in seo_["competitors"]:
-            if s.get("top_pages"):
-                H.append(f"<h3>{e(s['domain'])}: pages with the most traffic</h3>" + table(
-                    [{"page": link(p["url"]), "traffic": int(num(p["etv"])), "keywords": p["keywords"]} for p in s["top_pages"][:6]], ["page", "traffic", "keywords"], ["page", "visits/mo (est.)", "keywords"]))
-        if links:
-            H.append(f"<h3>Link targets: sites that link to 2+ competitors but not to us ({len(links)})</h3>" +
-                     table(links, ["domain", "dr", "links_to_n", "competitors"], ["site", "DR", "links to # competitors", "which"], 30))
+        section("How big is the money?", "Two different ways to guess how much money is in this market.")
+        goal = mk["year1_goal_usd"]
+        x = mk["bottom_up_usd_year"] / max(goal, 1)
+        H.append(plain("<b>Careful guess: %s a year.</b> That is roughly what the top sites can earn from these Google searches if about 1 in 100 visitors buys. "
+                       "<b>Big-picture guess: %s a year</b> for the whole industry; you will only ever get a small slice of that. "
+                       "Your first-year goal is %s, and the careful guess is <b>%.1f times</b> that (we want at least 10 times)."
+                       % (money(mk["bottom_up_usd_year"]), money(mk["top_down_usd_year"]), money(goal), x)))
+        H.append("<div class=two><div class=card><h4>How the careful guess works</h4><p class=small>%s</p></div><div class=card><h4>How the big-picture guess works</h4><p class=small>%s</p></div></div>"
+                 % (e(mk["bottom_up_method"]), e(first_sentence(mk["top_down_method"], 400))))
+        rows = [{"c": k.upper(), "s": ("{:,}".format(val) if isinstance(val, int) else val)} for k, val in mk.get("search_volume_by_country", {}).items()]
+        H.append("<h3>Where people search for it</h3>" + table(sorted(rows, key=lambda r: -num(str(r["s"]).replace(",", ""))), ["c", "s"], ["Country", "Searches a month (main words)"], right=("s",)))
+        if mk.get("underserved_countries_or_segments"):
+            H.append("<h3>Groups nobody serves well yet</h3>" + bullets([first_sentence(u, 260) for u in mk["underserved_countries_or_segments"]]))
+        if mk.get("segments"):
+            H.append("<h3>Who buys</h3>" + "".join("<div class=card><h4>%s %s</h4><p class=small>%s</p></div>" % (e(s["name"]), pill("underserved", GOOD) if s["underserved"] else "", e(s["size_note"])) for s in mk["segments"]))
+        end()
 
-    # ---------- plan ----------
-    if costs:
-        H.append("<h2>7. Costs, guardrails, to-do</h2>" + table([t for t in costs["tools"]], ["name", "purpose", "cost_start_usd_month", "cost_10x_usd_month", "limit", "account_owner"],
-                                                               ["tool", "for", "$/mo now", "$/mo at 10x", "limit", "owner"]) +
-                 f"<p>Data cost per sale: <b>{money(costs['data_cost_per_sale_usd'])}</b></p><h3>Marketing channels (thresholds fixed now)</h3>" +
-                 table(costs["marketing"], ["channel", "cost", "cap", "pass_threshold", "kill_threshold"], ["channel", "cost", "cap", "pass if", "kill if"]) +
-                 f"<h3>Guardrails for this business</h3>{bullets(costs['guardrails'])}<h3>Your manual to-do (block 19)</h3>" +
-                 table(costs["owner_todo"], ["task", "why", "minutes"]) + f"<h3>Open questions for you</h3>{bullets(costs['owner_questions'])}")
+    # ================= PART 5: MONEY =================
     if ue:
-        H.append("<h2>8. Money: unit economics</h2>" + table(ue["options"], ["model", "price_usd", "conversion_pct", "retention_months", "net_per_sale", "max_cac", "breakeven_cpc", "paid_search_cac"],
-                                                            ["model", "price $", "conversion %", "months kept", "net/sale $", "max CAC $", "break-even CPC $", "paid-search CAC $"]) +
-                 f"<p><b>Chosen:</b> {e(ue['chosen']['model'])}: the most profit per owner hour.</p><h3>Goal ladder</h3>" + table(ue["ladder"], ["goal", "by"]))
-    if (t := tf("18_swot.md")):
-        H.append("<h3>SWOT</h3>" + md(t))
-    if (t := tf("19_business_plan.md")):
-        H.append("<h2>9. The plan</h2>" + md(t))
-    if (cal := cf("19_seo_calendar_90d.csv")):
-        H.append("<h3>90-day calendar</h3>" + table(cal, ["week", "date", "type", "item", "keyword", "kd"], limit=60))
-    if (t := tf("18_gate3_memo.md")):
-        H.append("<h2>10. Gate 3 decision memo</h2><pre>" + e(t.replace("# Gate 3 memo", "").strip()) + "</pre>")
-    if (t := tf("20_quick_test.md")):
-        H.append("<h3>Quick test</h3>" + md(t))
-    if decisions:
-        H.append("<h3>Owner decisions</h3>" + table(decisions, ["ts", "gate", "decision", "note"], ["when", "gate", "decision", "note"]))
+        section("Will it make money?", "What you keep from each sale, and how much you can spend to win a customer.")
+        c = ue["chosen"]
+        ads_ok = c["paid_search_cac"] is not None and c["paid_search_cac"] <= c["max_cac"]
+        H.append(plain("Sell <b>%s</b> for <b>%s</b>. After costs and fees you keep <b>%s</b> per sale. You can spend up to <b>%s</b> to win one customer and still break even. "
+                       "Google ads would cost about <b>%s</b> per customer, so ads %s."
+                       % (e(c["model"]), money(c["price_usd"]), money(c["net_per_sale"]), money(c["max_cac"]), money(c["paid_search_cac"]),
+                          "<b>can work</b>" if ads_ok else "<b>would lose money</b>: get customers from Google search results (free) and email instead")))
+        rows = [{"m": o["model"], "p": money(o["price_usd"]), "k": money(o["net_per_sale"]), "c": money(o["max_cac"]), "h": money(o["profit_per_hour_at_1000_visits"])} for o in ue["options"]]
+        H.append("<h3>The ways to charge that were compared</h3>" + table(rows, ["m", "p", "k", "c", "h"],
+                                                                         ["How you charge", "Price", "You keep per sale", "Max to spend per customer", "Profit per hour of your time*"],
+                                                                         right=("p", "k", "c", "h")) + "<p class=small mute>* at 1,000 visitors a month, after fixed costs. The best one was picked.</p>")
+        if costs:
+            H.append("<p><b>Running costs:</b> about %s a month at the start, %s a month at 10 times the size.</p>"
+                     % (money(costs["budget_caps"]["fixed_cost_usd_month"]), money(costs["budget_caps"]["fixed_cost_10x_usd_month"])))
+        H.append("<h3>Goals and dates to aim for</h3><div class=tl>" + "".join("<div><b>%s</b>%s</div>" % (e(g["goal"]), e(g["by"])) for g in ue["ladder"]) + "</div>")
+        end()
 
-    # ---------- sources + spend ----------
+    # ================= PART 6: TRUST + FOR/AGAINST =================
+    if eeat or sc:
+        section("Can it work at all?", "Will Google trust the site, and the honest arguments for and against.")
+        if eeat:
+            names = {"real_person_or_company": "A real person or company behind it", "expertise_proof": "Proof you know the topic",
+                     "unique_data_per_page": "Something unique on every page", "contacts_policies_real_example": "Contact details, policies, a real example"}
+            oks = sum(1 for k in names if eeat[k]["ok"])
+            H.append(plain("Google only shows sites it trusts. <b>%d of 4</b> trust checks can be met by launch. Risk level for this topic: <b>%s</b>." % (oks, e(eeat["ymyl_level"]))))
+            rows = [{"c": names[k], "ok": pill("yes", GOOD) if eeat[k]["ok"] else pill("no", BAD), "a": first_sentence(eeat[k]["answer"], 260)} for k in names]
+            H.append(table(rows, ["c", "ok", "a"], ["Trust check", "Can we?", "Why"], raw=("ok",)))
+            if eeat.get("ymyl_banned_claims"):
+                H.append("<h3>Never say this on the site</h3>" + bullets(eeat["ymyl_banned_claims"]))
+        if sc:
+            H.append("<h3>For and against</h3><div class=two><div class=card><h4 style='color:%s'>For</h4>%s</div><div class=card><h4 style='color:%s'>Against</h4>%s</div></div>"
+                     % (GOOD, bullets(sc["pros"]), BAD, bullets(sc["cons"])))
+            H.append("<div class=worry><b>The biggest unknown:</b> %s</div>" % e(sc["biggest_unknown"]))
+        end()
+
+    # ================= PART 7: THE PLAN =================
+    bp = tf("19_business_plan.md")
+    if plan or costs or tf("20_quick_test.md"):
+        section("The plan", "What to build first, what to do by hand, and the rules to follow.")
+        if bp:
+            m = re.search(r"\*\*Why us \(5 seconds\):\*\*\s*(.+)", bp)
+            if m:
+                H.append(plain("<b>Why customers would pick you:</b> %s" % e(m.group(1).strip())))
+            prod = re.search(r"## Product line\n(.*?)\n\n##", bp, re.S)
+            if prod:
+                H.append("<h3>What to sell</h3>" + md(prod.group(1)))
+            fc = re.search(r"Low \$([\d,]+) \| Mid \$([\d,]+) \| High \$([\d,]+)", bp)
+            if fc:
+                H.append("<p><b>First-year sales forecast:</b> bad case $%s &middot; likely $%s &middot; good case $%s</p>" % fc.groups())
+        if plan:
+            rows = [{"p": p["title"], "t": p["page_type"], "s": "{:,}".format(int(num(p.get("volume")))), "kd": kd_word(p.get("kd")), "u": first_sentence(p["unique_data_source"], 140)}
+                    for p in plan["pages"][:12]]
+            H.append("<h3>The first pages to build (%d planned)</h3>" % len(plan["pages"]) +
+                     table(rows, ["p", "t", "s", "kd", "u"], ["Page", "Type", "Searches a month", "How hard", "What makes it unique"], raw=("kd",), right=("s",)))
+        if costs:
+            H.append("<h3>Do these by hand before building</h3>" + table(costs["owner_todo"], ["task", "minutes"], ["Task", "Minutes"], right=("minutes",)))
+            H.append("<h3>Rules for this business</h3>" + bullets(costs["guardrails"][:10]))
+        if (t := tf("20_quick_test.md")):
+            H.append("<h3>The quick test</h3>" + md(t))
+        end()
+
+    # ================= APPENDIX =================
+    H.append("<div class=sec><span class=num>APPENDIX</span><h2>The details</h2><p class=mute>For checking the work. You can skip this.</p>")
+    rows = []
+    for bid in sorted(bl):
+        st = bl[bid]
+        vd = st.get("verdict") or st["status"].lower()
+        word = {"pass": pill("good", GOOD), "warn": pill("careful", CARE), "kill": pill("problem", BAD), "redo": pill("problem", BAD)}.get(vd, pill(vd, MUTE))
+        rows.append({"n": bid, "q": STEP_NAMES.get(bid, bid), "r": word, "f": first_sentence(st.get("summary") or st.get("error"), 300)})
+    H.append("<h3>A. Every step and what it found</h3>" + table(rows, ["n", "q", "r", "f"], ["#", "Step", "Result", "What it found"], raw=("r",)))
+    if clusters:
+        rows = [{"h": c["head"], "v": "{:,}".format(int(c["volume"])), "k": kd_word(c.get("kd")), "n": len(c["keywords"]), "w": "; ".join(c["weak_spots"]) or "-"} for c in clusters[:30]]
+        H.append("<h3>B. Page topics (each one = one page)</h3>" + table(rows, ["h", "v", "k", "n", "w"], ["Main search", "Searches a month", "How hard", "Searches covered", "Rivals' weak spots"], raw=("k",), right=("v", "n")))
+    if links:
+        rows = [{"d": l["domain"], "s": l["dr"], "n": l["links_to_n"]} for l in links[:30]]
+        H.append("<h3>C. Sites to ask for a link (%d found)</h3><p class=small>They already link to 2 or more rivals, so they are likely to link to you.</p>" % len(links) +
+                 table(rows, ["d", "s", "n"], ["Site", "Strength (0-100)", "Links to how many rivals"], right=("s", "n")))
+    if (cal := cf("19_seo_calendar_90d.csv")):
+        H.append("<h3>D. 90-day calendar</h3>" + table(cal, ["week", "type", "item", "keyword"], ["Week", "What", "Item", "Search"], limit=60))
+    if (t := tf("18_swot.md")):
+        H.append("<h3>E. Strengths, weaknesses, opportunities, threats</h3>" + md(t))
+    if decisions:
+        H.append("<h3>F. Your decisions</h3>" + table(decisions, ["ts", "gate", "decision", "note"], ["When", "Step", "Decision", "Note"]))
+    H.append("<h3>G. Glossary</h3>" + table([{"t": a, "m": b} for a, b in GLOSSARY], ["t", "m"], ["Word", "What it means"]))
     acc = {}
     for name in ("02_how_analysis.json", "04_niche_pulse.json", "13_competitor_business.json", "14_market_analysis.json"):
         if (x := jf(name)):
             urls_in(x, acc)
     led = store.ledger(slug)
-    by = {}
-    for r in led:
-        a = by.setdefault(r["provider"], {"provider": r["provider"], "calls": 0, "cached": 0, "usd": 0.0})
-        a["calls"] += 1
-        a["cached"] += r["cached"]
-        a["usd"] = round(a["usd"] + r["usd"], 3)
-    H.append("<h2>Sources and spend</h2><p class=small>Pages the research used (opened by the AI or returned by DataForSEO):</p><ol class=small>" +
-             "".join(f"<li>{link(u)}</li>" for u in list(acc)[:200]) + "</ol>" +
-             table(list(by.values()), ["provider", "calls", "cached", "usd"], ["provider", "calls", "from cache", "USD"]) +
-             f"<p class=small>Counted against the cap: {money(store.spent(slug))} of {money(S.max_usd_per_idea)}. Claude Code CLI runs on a subscription and is not counted unless VM_COUNT_CLI_COST=1.</p>")
-    return (f"<!doctype html><html lang=en><head><meta charset=utf-8><title>{e(slug)} findings</title><style>{CSS}</style></head>"
-            f"<body>{''.join(H)}</body></html>")
+    paid = sum(r["usd"] for r in led if r["provider"] == "dataforseo")
+    H.append("<h3>H. Sources</h3><ol class=small>" + "".join("<li>%s</li>" % link(u) for u in list(acc)[:200]) + "</ol>")
+    H.append("<p class=small>Money spent on data for this idea: <b>%s</b> (DataForSEO %s, %d calls, %d free from cache). Limit: %s per idea.</p></div>"
+             % (money(store.spent(slug)), money(paid), len(led), sum(r["cached"] for r in led), money(S.max_usd_per_idea)))
+    return ("<!doctype html><html lang=en><head><meta charset=utf-8><title>%s findings</title><style>%s</style></head><body>%s</body></html>"
+            % (e(slug), CSS, "".join(H)))
 
 
 BROWSERS = [
