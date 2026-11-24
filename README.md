@@ -25,7 +25,13 @@ A real idea usually costs **$0.30-1.50** in DataForSEO calls. Phase 1 costs a fe
 ## What the findings PDF tells you
 
 A plain-language report anyone can read:
-- **The answer first:** build it / test it cheaply first / don't build it. Then the 7-point scorecard, the things to worry about, and what to do next.
+- **A simple report on page 1:**
+  - a score out of 100 and the answer (build it / test it cheaply first / don't build it)
+  - the 7 checks, each scored out of 10
+  - one line on every topic, tagged good / careful / problem
+  - the top worries and what to do next
+
+  Everything after page 1 is the detail.
 - **Is there demand?** Real Google searches, how hard each one is to rank for, and whether interest is growing.
 - **How hard is it to get onto Google, and how do you do it?** Each important search is rated Easy / Doable / Hard / Very hard, from three signals:
   - keyword difficulty
@@ -123,7 +129,7 @@ The state (blocks, gate decisions, the money ledger and the cache) is kept in `d
 |---|---|---|
 | **1** | after the idea filter | **GO** (start the paid keyword research) / **KILL** (archived, never re-pitched) |
 | **2** | after the competitor and market research | **GO** / **PIVOT** (narrow to one country, B2B or a smaller segment; phases 2-3 re-run on it) / **KILL** |
-| **3** | after the plan | 7-criteria score out of 5: below 3.0 is a KILL; 3.0-3.5 is a **QUICK TEST** (7 days, max $150, thresholds written first); 3.5 or more is **GO** to build |
+| **3** | after the plan | 7 checks, each scored out of 10, plus an overall score out of 100: under 60 is a KILL; 60-69 is a **QUICK TEST** (7 days, max $150, thresholds written first); 70 or more is **GO** to build |
 
 Every block has its own pass/kill test from the spec, for example:
 - 02: a competitor must already be charging money.

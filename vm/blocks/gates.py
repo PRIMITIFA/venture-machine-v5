@@ -86,10 +86,10 @@ def gate3_scores(c):
 def memo3(c):
     s, avg = gate3_scores(c)
     rec = "KILL" if avg < 3.0 else "QUICK TEST (7 days, capped)" if avg < 3.5 else "FULL BUILD"
-    store.set_data(c.slug, gate3_score=avg, gate3_recommendation=rec)
+    store.set_data(c.slug, gate3_score=avg, gate3_score100=round(avg * 20), gate3_recommendation=rec)
     ue = c.v["data"].get("unit_economics", {})
     qs = c.read("16_owner_questions.md", default="")
-    lines = [f"Score {avg}/5 -> recommendation: {rec}"] + [f"  {k:11} {v[0]}/5  {v[1]}" for k, v in s.items()] + [
+    lines = [f"Score {round(avg * 20)}/100 -> recommendation: {rec}"] + [f"  {k:11} {v[0] * 2:>2}/10  {v[1]}" for k, v in s.items()] + [
         f"Model: {ue.get('model')} at ${ue.get('price_usd')} | net ${ue.get('net_per_sale')}/sale | max CAC ${ue.get('max_cac')}",
         "Answer the open questions in 16_owner_questions.md before GO." if "Answer: \n" in qs or qs.rstrip().endswith("Answer:") else "",
         _spent(c)]

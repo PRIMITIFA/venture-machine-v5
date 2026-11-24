@@ -55,7 +55,7 @@ def body(slug, actions=""):
          "<div class=grid>",
          f"<div class=card><div class=mute>Status</div><div class=big>{e(status_label(v['status']))}</div></div>",
          f"<div class=card><div class=mute>Counted spend</div><div class=big>${spent:.2f}</div><div class=mute>cap ${S.max_usd_per_idea:.2f}; all incl. subscription ${allc:.2f}</div></div>",
-         f"<div class=card><div class=mute>Gate 3 score</div><div class=big>{e(v['data'].get('gate3_score', '-'))}</div><div class=mute>{e(v['data'].get('gate3_recommendation', ''))}</div></div>",
+         f"<div class=card><div class=mute>Score</div><div class=big>{e(v['data'].get('gate3_score100', '-'))}<span class=mute style='font-size:14px'>/100</span></div><div class=mute>{e(v['data'].get('gate3_recommendation', ''))}</div></div>",
          "</div>", actions]
     if v.get("pivot_note"):
         h.append(f"<div class=card><b>Pivot:</b> {e(v['pivot_note'])}</div>")

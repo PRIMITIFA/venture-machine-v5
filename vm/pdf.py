@@ -55,6 +55,17 @@ th{font-weight:600;color:%(MUTE)s;font-size:8pt;text-transform:none}tr{break-ins
 .tl b{display:block;font-size:9pt}
 pre{white-space:pre-wrap;font:8.5pt/1.45 Consolas,ui-monospace,monospace;margin:0}
 .foot{font-size:8pt;color:%(MUTE)s;margin-top:14pt}
+.herogrid{display:grid;grid-template-columns:96pt 1fr;gap:16pt;align-items:center}
+.ring{width:92pt;height:92pt;border-radius:50%%;display:grid;place-items:center}
+.ring>div{width:74pt;height:74pt;border-radius:50%%;display:flex;align-items:center;justify-content:center;color:#fff}
+.ring b{font-size:26pt;line-height:1}.ring span{font-size:9pt;opacity:.85;margin-left:1pt}
+.mini{display:grid;grid-template-columns:1fr 1fr;gap:4pt 18pt;margin:4pt 0 4pt}
+.mini>div{display:grid;grid-template-columns:118pt 1fr 18pt;gap:6pt;align-items:center;font-size:9pt;break-inside:avoid}
+.mini .bar{height:7pt;background:%(SOFT)s;border-radius:99px;overflow:hidden;display:block}.mini .bar i{display:block;height:100%%;border-radius:99px}
+.mini b{text-align:right}
+table.glance td{padding:5pt 6pt;font-size:9.5pt}table.glance td.t{font-weight:700;width:105pt;white-space:nowrap}
+.divider{background:%(INK)s;color:#fff;border-radius:10pt;padding:16pt 18pt;margin-bottom:14pt}.divider .lbl{font-size:9pt;letter-spacing:.1em;opacity:.7}
+.divider .big{font-size:18pt;font-weight:800}
 """ % dict(INK=INK, MUTE=MUTE, LINE=LINE, SOFT=SOFT, GOOD=GOOD, CARE=CARE, BAD=BAD, INFO=INFO)
 
 STEP_NAMES = {
@@ -264,11 +275,11 @@ def answer_of(v, data, n_done):
     if st == "quick_test":
         return "TEST IT CHEAPLY FIRST", CARE, "You chose a small, capped test before building. The test plan is below."
     if rec.startswith("FULL"):
-        return "LOOKS GOOD: BUILD IT", GOOD, "It scored %s out of 5 on the 7 checks that matter most." % data.get("gate3_score")
+        return "LOOKS GOOD: BUILD IT", GOOD, "It scored %d out of 100 on the 7 checks that matter most." % round(num(data.get("gate3_score")) * 20)
     if rec.startswith("QUICK"):
-        return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %s out of 5. Not clear enough to build; run a small capped test first." % data.get("gate3_score")
+        return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %d out of 100. Not clear enough to build; run a small capped test first." % round(num(data.get("gate3_score")) * 20)
     if rec.startswith("KILL"):
-        return "DON'T BUILD IT", BAD, "It scored only %s out of 5 on the 7 checks that matter most." % data.get("gate3_score")
+        return "DON'T BUILD IT", BAD, "It scored only %d out of 100 on the 7 checks that matter most." % round(num(data.get("gate3_score")) * 20)
     return "NOT FINISHED YET", "#52525b", "The machine has done %d of 18 steps so far. Run it again to continue." % n_done
 
 
@@ -308,63 +319,28 @@ def build_html(slug):
     def end():
         H.append("</div>")
 
-    # ================= PAGE 1: THE ANSWER =================
+    # ================= WORK OUT EVERYTHING FIRST =================
     ans, color, why = answer_of(v, data, n_done)
     overridden = [g for g in decisions if g["decision"] == "override"]
     if color == GOOD and overridden:
         ans, color = "GOOD NUMBERS, BUT A STOP WAS SKIPPED", CARE
-        why += " But you skipped a stop at step %s. Read 'Things to worry about' before building." % ", ".join(sorted({g["gate"] for g in overridden}))
+        why += " But you skipped a stop at step %s. Read the worries before building." % ", ".join(sorted({g["gate"] for g in overridden}))
     buy = [k for k in (kws or []) if k["intent"] in ("buy", "competitor", "brand-model")]
     buy_vol = int(sum(num(k["volume"]) for k in buy))
-    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; FINDINGS REPORT &middot; %s</div>" % e(store.now()[:10]))
-    H.append("<h1>%s</h1>" % e(v["one_liner"] or v["idea"]))
-    H.append("<p class=mute>Checked for: %s &middot; Language: %s &middot; Steps done: %d of 18 &middot; Data bought: %s</p>"
-             % (e(v["country"].upper()), e(v["lang"]), n_done, money(store.spent(slug))))
-    H.append("<div class=hero style='background:%s'><div class=lbl>THE ANSWER</div><div class=ans>%s</div><p>%s</p></div>" % (color, e(ans), e(why)))
-    if sc:
-        H.append("<h3>Why, in three sentences</h3>" + bullets(sc["summary_3_lines"]))
-    kpis = []
-    if buy:
-        top_cpc = max(num(k["cpc"]) for k in buy)
-        kpis.append(("{:,}".format(buy_vol), "searches a month", "from people who look ready to buy (Google data)"))
-        kpis.append((money(top_cpc), "price of one ad click", "advertisers pay this per click; high = buyers are worth money"))
-    if mk:
-        kpis.append((money(mk["bottom_up_usd_year"]) + "/yr", "careful market size", "what the top sites can earn from these searches"))
-    if seo_:
-        drs = [num(s["dr"], 100) for s in seo_["competitors"] if s.get("dr") is not None]
-        if drs:
-            kpis.append(("%d / 100" % min(drs), "weakest rival's strength", "under 30 means a new site can beat it"))
-    if data.get("unit_economics"):
-        kpis.append((money(data["unit_economics"].get("net_per_sale")), "you keep per sale", "after data costs and payment fees"))
-    if sc:
-        kpis.append(("%s days" % sc["effort"]["days_to_mvp"], "to a first version", "time to build something people can pay for"))
-    if kpis:
-        H.append("<div class=kpis>" + "".join("<div class=kpi><div class=v>%s</div><div class=l>%s</div><div class=x>%s</div></div>" % (e(a), e(b), e(c)) for a, b, c in kpis) + "</div>")
-    H.append("<p class=foot>How to read this: Part 1 is the scorecard and what to do next. Each later part answers one plain question "
-             "and starts with a blue \"in plain words\" box. Every number comes from Google data (via DataForSEO) or a web page the AI opened; "
-             "sources are listed at the back. Words like CPC or KD are explained in the glossary at the end.</p>")
-
-    # ================= PART 1: SCORECARD + WORRIES + NEXT =================
-    section("The scorecard", "The 7 things that decide if this idea is worth building, each scored 1 to 5.")
     try:
         scores, avg = gate3_scores(Ctx(slug)) if comps and mk and seo_ and clusters else (None, None)
     except Exception:
         scores, avg = None, None
-    if scores:
-        H.append(plain("Overall <b>%s out of 5</b>. Below 3 means don't build. 3 to 3.5 means run a cheap test first. 3.5 or more means build." % avg))
-        for k, (val, why_) in scores.items():
-            col = GOOD if val >= 4 else CARE if val == 3 else BAD
-            H.append("<div class=score><div class=q>%s</div><div class=bar><i style='width:%d%%;background:%s'></i></div><div><b>%d</b>/5</div><div class=why>%s</div></div>"
-                     % (e(QUESTIONS.get(k, k)), val * 20, col, val, e(why_)))
-    else:
-        H.append(plain("The scorecard appears once all research steps are done (step 18). So far %d of 18 steps are done." % n_done))
-    worries = ["You skipped a stop at step %s (%s). Your reason: \"%s\"" % (g["gate"], STEP_NAMES.get(g["gate"], ""), g["note"]) for g in overridden]
+    score100 = int(round(avg / 5 * 100)) if avg else None
+    aiv = jf("15_ai_visibility.json")
     uec = (ue or {}).get("chosen") or {}
+
+    worries = ["You skipped a stop at step %s (%s). Your reason: \"%s\"" % (g["gate"], STEP_NAMES.get(g["gate"], ""), g["note"]) for g in overridden]
     for bid in sorted(bl):
-        st = bl[bid]
-        if st.get("verdict") not in ("warn", "kill") or bid in ("05", "14", "18"):
+        st_ = bl[bid]
+        if st_.get("verdict") not in ("warn", "kill") or bid in ("05", "14", "18"):
             continue
-        summ = re.sub(r"\s*\|\s*OWNER OVERRIDE:.*$", "", st.get("summary") or "")
+        summ = re.sub(r"\s*\|\s*OWNER OVERRIDE:.*$", "", st_.get("summary") or "")
         if bid == "04" and sc:
             w = "The quick gut-check score is only %s out of 10 (6 or more is good)." % sc["ice_avg"]
         elif bid == "12" and mk:
@@ -376,30 +352,125 @@ def build_html(slug):
         worries.append(w)
     if sc and sc.get("risks"):
         worries += [first_sentence(r) for r in sc["risks"][:3]]
-    H.append("<h3>Things to worry about</h3>")
-    H.append("<div class=worry>%s</div>" % bullets(worries) if worries else "<p>Nothing serious was flagged.</p>")
-    H.append("<h3>What to do next</h3>")
+
     st = v["status"]
     nxt = []
     if st.startswith("gate_"):
         g = {"gate_05": ("#1", "GO starts the paid keyword research (about $0.50-1.50). KILL archives the idea."),
              "gate_14": ("#2", "GO goes on to costs and the plan. PIVOT narrows the idea (one country, businesses only, a smaller group) and redoes the research. KILL archives it."),
              "gate_18": ("#3", "GO approves building it. TEST runs a small capped test first. KILL archives it.")}[st]
-        nxt += ["Read this report (start with Part 1 and the worries above).", "Make decision %s in the app or with: vm gate %s go | kill%s" % (g[0], slug, " | pivot \"...\"" if st == "gate_14" else " | test" if st == "gate_18" else ""), g[1]]
+        nxt += ["Read the worries.", "Make decision %s in the app or with: vm gate %s go | kill%s" % (g[0], slug, " | pivot \"...\"" if st == "gate_14" else " | test" if st == "gate_18" else ""), g[1]]
         if st == "gate_18" and costs and costs.get("owner_questions"):
             nxt += ["Answer this first: " + first_sentence(q, 200) for q in costs["owner_questions"][:3]]
     elif st == "approved_build" and costs:
         nxt += ["%s (about %s min): %s" % (t["task"], t["minutes"], t["why"]) for t in costs["owner_todo"][:6]]
     elif st == "quick_test" and tf("20_quick_test.md"):
-        nxt.append("Run the quick test in Part 7. Stop the moment the kill line is hit.")
+        nxt.append("Run the quick test described in 'The plan'. Stop the moment the kill line is hit.")
     elif st in ("kill_recommended", "alert"):
-        nxt += ["Read the worries above.", "Agree and stop: vm gate %s kill" % slug, "Or continue anyway with a reason: vm gate %s override \"why\"" % slug]
+        nxt += ["Read the worries.", "Agree and stop: vm gate %s kill" % slug, "Or continue anyway with a reason: vm gate %s override \"why\"" % slug]
     elif st == "killed":
         nxt.append("Nothing. Try the next idea.")
     else:
         nxt.append("Run it again to continue: vm run %s" % slug)
-    H.append("<ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in nxt) + "</ol>")
-    end()
+
+    # one line per topic for the simple report: (topic, what we found, verdict word, colour)
+    glance = []
+
+    def verdict(ok, care):
+        return ("good", GOOD) if ok else ("careful", CARE) if care else ("problem", BAD)
+    if buy:
+        top_cpc = max(num(k["cpc"]) for k in buy)
+        glance.append(("Demand", "{:,} searches a month from people ready to buy".format(buy_vol), *verdict(buy_vol >= 1000, buy_vol >= 300)))
+        glance.append(("Buyer value", "advertisers pay up to %s per click" % money(top_cpc), *verdict(top_cpc >= 2, top_cpc >= 1)))
+    if pulse:
+        ch = pulse.get("change_24m_pct_best")
+        if pulse["status"] == "dying":
+            txt = "interest is shrinking"
+        elif ch is not None and ch < -10:
+            txt = "searches are down %d%% in 2 years, but people still buy (ads, new sites, questions)" % abs(ch)
+        elif ch is not None and ch > 10:
+            txt = "searches are up %d%% in 2 years" % ch
+        else:
+            txt = "interest is steady"
+        glance.append(("Trend", txt, *verdict(pulse["status"] == "alive" and (ch is None or ch >= -10), pulse["status"] != "dying")))
+    if clusters:
+        lv = [rank_level(cl)[0] for cl in clusters[:15]]
+        ez = sum(1 for x in lv if x <= 1)
+        glance.append(("Getting onto Google", "%d of the %d most valuable searches are Easy or Doable" % (ez, len(lv)), *verdict(ez >= len(lv) / 2, ez >= len(lv) / 4)))
+    if aiv:
+        g_ = aiv.get("google_ai_overview") or {}
+        share = aiv.get("rival_share") or {}
+        rec_ = aiv.get("ai_recommends") or []
+        glance.append(("AI assistants", "Google answers %s of %s searches with its own AI (fewer clicks); ChatGPT/Perplexity recommend %s most"
+                       % (g_.get("with_ai_answer", 0), g_.get("searches", 0), ", ".join(r["site"] for r in rec_[:2]) or "nobody"),
+                       *verdict(g_.get("with_ai_answer", 0) <= g_.get("searches", 0) / 2, True)))
+    if seo_:
+        drs = [num(s_["dr"]) for s_ in seo_["competitors"] if s_.get("dr")]
+        if drs:
+            glance.append(("Rivals", "the weakest of the top 5 has strength %d/100%s" % (min(drs), ("; gap: " + first_sentence(biz["identified_gap"], 120)) if biz else ""),
+                           *verdict(min(drs) < 40, min(drs) < 60)))
+    if mk:
+        x_ = mk["bottom_up_usd_year"] / max(mk["year1_goal_usd"], 1)
+        glance.append(("Market size", "careful guess %s a year, %.1fx your first-year goal" % (money(mk["bottom_up_usd_year"]), x_), *verdict(x_ >= 10, x_ >= 3)))
+    if uec:
+        ads_ok = uec.get("paid_search_cac") is not None and uec["paid_search_cac"] <= uec.get("max_cac", 0)
+        glance.append(("Money", "you keep %s per sale; Google ads %s" % (money(uec["net_per_sale"]), "can pay off" if ads_ok else "would lose money"),
+                       *verdict(uec["net_per_sale"] > 0 and ads_ok, uec["net_per_sale"] > 0)))
+    if eeat:
+        oks = sum(1 for k in ("real_person_or_company", "expertise_proof", "unique_data_per_page", "contacts_policies_real_example") if eeat[k]["ok"])
+        glance.append(("Google trust", "%d of 4 trust checks can be met by launch" % oks, *verdict(oks == 4, oks == 3)))
+    if sc:
+        fixed = (costs or {}).get("budget_caps", {}).get("fixed_cost_usd_month")
+        glance.append(("Effort", "%s days to a first version%s" % (sc["effort"]["days_to_mvp"], ("; about %s a month to run" % money(fixed)) if fixed is not None else ""),
+                       *verdict(sc["effort"]["days_to_mvp"] <= 14, sc["effort"]["days_to_mvp"] <= 30)))
+
+    # ================= THE SIMPLE REPORT (page 1-2) =================
+    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; FINDINGS REPORT &middot; %s</div>" % e(store.now()[:10]))
+    H.append("<h1>%s</h1>" % e(v["one_liner"] or v["idea"]))
+    H.append("<p class=mute>Checked for: %s &middot; Steps done: %d of 18 &middot; Data bought: %s</p>"
+             % (e(v["country"].upper()), n_done, money(store.spent(slug))))
+    ring = ("<div class=ring style='background:conic-gradient(#fff %d%%, rgba(255,255,255,.3) 0)'><div style='background:%s'><b>%d</b><span>/100</span></div></div>"
+            % (score100, color, score100) if score100 is not None else
+            "<div class=ring style='background:rgba(255,255,255,.3)'><div style='background:%s'><b>?</b><span>/100</span></div></div>" % color)
+    H.append("<div class=hero style='background:%s'><div class=herogrid>%s<div><div class=lbl>THE ANSWER</div><div class=ans>%s</div><p>%s</p></div></div></div>"
+             % (color, ring, e(ans), e(why)))
+    if scores:
+        H.append("<h3>The 7 scores (out of 10)</h3><div class=mini>" + "".join(
+            "<div><span class=q>%s</span><span class=bar><i style='width:%d%%;background:%s'></i></span><b>%d</b></div>"
+            % (e(QUESTIONS.get(k, k)), val * 20, GOOD if val >= 4 else CARE if val == 3 else BAD, val * 2) for k, (val, _w) in scores.items()) + "</div>"
+            + "<p class='small mute'>Overall score = the average of the 7, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build.</p>")
+    if glance:
+        H.append("<h3>Everything at a glance</h3><table class=glance>" + "".join(
+            "<tr><td class=t>%s</td><td>%s</td><td class=n>%s</td></tr>" % (e(t), e(f), pill(w, c)) for t, f, w, c in glance) + "</table>")
+    if sc:
+        H.append("<h3>In three sentences</h3>" + bullets(sc["summary_3_lines"]))
+    H.append("<div class=two><div><h3>Top worries</h3>%s</div><div><h3>What to do next</h3><ol class=steps>%s</ol></div></div>"
+             % ("<div class=worry>%s</div>" % bullets(worries[:4]) if worries else "<p>Nothing serious was flagged.</p>",
+                "".join("<li>%s</li>" % e(x) for x in nxt[:4])))
+    H.append("<p class=foot>That is the whole story in short. Everything below is the detail and the proof: each part answers one plain question and "
+             "starts with a blue \"in plain words\" box. Numbers come from Google data (via DataForSEO) or web pages the AI opened; sources are at the back, "
+             "and words like CPC or KD are explained in the glossary.</p>")
+
+    # ================= THE DETAILS =================
+    H.append("<div class=sec><div class=divider><div class=lbl>THE DETAILS</div><div class=big>Everything we found, step by step</div></div>")
+    section_open = True  # the first part shares the divider page
+
+    # ================= PART 1: SCORECARD IN DETAIL =================
+    sec[0] += 1
+    H.append("<span class=num>PART 1</span><h2>The scorecard in detail</h2><p class=mute>The 7 things that decide if this idea is worth building, each out of 10.</p>")
+    if scores:
+        H.append(plain("Overall <b>%d out of 100</b>. Under 60 means don't build. 60 to 69 means run a cheap test first. 70 or more means build." % score100))
+        for k, (val, why_) in scores.items():
+            col = GOOD if val >= 4 else CARE if val == 3 else BAD
+            H.append("<div class=score><div class=q>%s</div><div class=bar><i style='width:%d%%;background:%s'></i></div><div><b>%d</b>/10</div><div class=why>%s</div></div>"
+                     % (e(QUESTIONS.get(k, k)), val * 20, col, val * 2, e(why_)))
+    else:
+        H.append(plain("The scores appear once all research steps are done (step 18). So far %d of 18 steps are done." % n_done))
+    H.append("<h3>All the worries</h3>")
+    H.append("<div class=worry>%s</div>" % bullets(worries) if worries else "<p>Nothing serious was flagged.</p>")
+    H.append("<h3>All next steps</h3><ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in nxt) + "</ol>")
+    if section_open:
+        end()
 
     # ================= PART 2: DEMAND =================
     if short or pulse:
