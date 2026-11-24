@@ -1,6 +1,5 @@
 """PHASE 2: DEMAND + SEO (blocks 06-09). Real search demand, live SERPs, clusters (1 cluster = 1 page),
 and the real top-5 competitors for phase 3. All raw API data is cached 30 days; spend is capped."""
-import json
 from collections import Counter, defaultdict
 from typing import Literal
 
@@ -183,13 +182,13 @@ def b08_serp_clusters(c):
         weak = []
         if any(page_format(o["domain"], o["url"], o["title"]) == "forum" for o in top10):
             weak.append("forum/Reddit in top 10")
-        low = [o["domain"] for o in top10 if ranks.get(o["domain"]) is not None and ranks[o["domain"]] < 20]
+        low = [o["domain"] for o in top10 if ranks.get(o["domain"]) and ranks[o["domain"]] < 20]  # 0 = no data
         if low:
             weak.append(f"DR<20 in top 10 ({', '.join(sorted(set(low))[:3])})")
         if s["features"].get("paid", 0) >= 3:
             weak.append("ads on top")
         better_format = fmts.get("tool", 0) == 0 and s["intent"] in ("buy", "brand-model")
-        top5_dr = [ranks.get(o["domain"]) for o in top5 if ranks.get(o["domain"]) is not None]
+        top5_dr = [ranks.get(o["domain"]) for o in top5 if ranks.get(o["domain"])]
         clusters.append({
             "id": i, "head": cl["head"], "keywords": cl["keywords"], "volume": cl["volume"], "intent": s["intent"],
             "cpc": s["cpc"], "features": s["features"], "winning_format": fmts.most_common(1)[0][0] if fmts else "unknown",

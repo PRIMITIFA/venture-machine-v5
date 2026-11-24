@@ -24,6 +24,9 @@ EST = {
     "backlinks/summary/live": 0.03,
     "backlinks/referring_domains/live": 0.04,
     "backlinks/bulk_ranks/live": 0.04,
+    "ai_optimization/chat_gpt/llm_responses/live": 0.05,
+    "ai_optimization/perplexity/llm_responses/live": 0.02,
+    "ai_optimization/llm_mentions/aggregated_metrics/live": 0.12,
 }
 
 GENERIC = {"reddit.com", "youtube.com", "wikipedia.org", "en.wikipedia.org", "amazon.com", "quora.com", "facebook.com",
@@ -192,7 +195,7 @@ def serp(keyword, loc, lang, depth=None):
     items = (res[0].get("items") or []) if res else []
     organic, features = [], {"ai_overview": False, "paid": 0, "people_also_ask": False, "video": False,
                              "local_pack": False, "featured_snippet": False}
-    paid = []
+    paid, aio_refs = [], []
     for it in items:
         t = it.get("type")
         if t == "organic":
@@ -203,11 +206,64 @@ def serp(keyword, loc, lang, depth=None):
             features["paid"] += 1
             dom, url, _ = _real(it)
             paid.append({"domain": dom, "title": it.get("title") or "", "description": (it.get("description") or "")[:200], "url": url})
+        elif t == "ai_overview":
+            features["ai_overview"] = True
+            aio_refs += _domains_in(it)
         elif t in features:
             features[t] = True
         elif t == "video":
             features["video"] = True
-    return {"keyword": keyword, "organic": organic, "paid": paid, "features": features}
+    return {"keyword": keyword, "organic": organic, "paid": paid, "features": features, "ai_overview_sources": sorted(set(aio_refs))}
+
+
+def _domains_in(obj):
+    """Every 'domain' inside an AI Overview block (its cited references and links)."""
+    out = []
+    if isinstance(obj, dict):
+        d = obj.get("domain")
+        if isinstance(d, str) and d and d.lower().removeprefix("www.") != "google.com":  # google.com = hidden redirect links
+            out.append(d.lower().removeprefix("www."))
+        for v in obj.values():
+            out += _domains_in(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            out += _domains_in(v)
+    return out
+
+
+def ai_answer(engine, prompt, country_iso="US"):
+    """Ask ChatGPT (with web search) or Perplexity a buyer question. Returns text + the sites it cited."""
+    if engine == "chatgpt":
+        res = post("ai_optimization/chat_gpt/llm_responses/live",
+                   {"user_prompt": prompt[:500], "model_name": "gpt-4.1-mini", "web_search": True, "max_output_tokens": 700,
+                    "web_search_country_iso_code": country_iso.upper()})
+    else:
+        res = post("ai_optimization/perplexity/llm_responses/live",
+                   {"user_prompt": prompt[:500], "model_name": "sonar", "max_output_tokens": 700, "web_search_country_iso_code": country_iso.upper()})
+    r = res[0] if res else {}
+    text, urls = "", []
+    for it in r.get("items") or []:
+        for sec in it.get("sections") or []:
+            text += (sec.get("text") or "") + "\n"
+            urls += [a.get("url") for a in (sec.get("annotations") or []) if a.get("url")]
+    urls += [x.get("url") for x in (r.get("search_results") or []) if x.get("url")]
+    doms = []
+    for u in urls:
+        m = re.match(r"^https?://(?:www\.)?([^/:?#]+)", u or "")
+        if m and m.group(1).lower() not in doms:
+            doms.append(m.group(1).lower())
+    return {"engine": engine, "prompt": prompt, "text": text.strip(), "cited": doms}
+
+
+def ai_sources(keyword, loc, lang):
+    """Which sites Google's AI Overviews cite most on this topic (DataForSEO LLM Mentions)."""
+    res = post("ai_optimization/llm_mentions/aggregated_metrics/live",
+               {"location_code": loc, "language_code": lang, "platform": "google",
+                "target": [{"keyword": clean_kw(keyword), "search_scope": ["any"]}], "internal_list_limit": 20})
+    tot = (res[0].get("total") or {}) if res else {}
+    pick = lambda k: [{"site": (g.get("key") or "").removeprefix("www."), "mentions": g.get("mentions")} for g in (tot.get(k) or [])]
+    return {"sources": pick("sources_domain"), "brands": pick("brand_entities_title"),
+            "answers": sum((g.get("mentions") or 0) for g in (tot.get("platform") or []))}
 
 
 def serps(keywords, loc, lang, workers=10):

@@ -88,7 +88,7 @@ def registry():
         Block("10", "Top-5 UX audit", 3, "auto", phase3.b10_ux),
         Block("11", "Prices, models, ads", 3, "auto", phase3.b11_business),
         Block("12", "Market size + buyers", 3, "auto", phase3.b12_market),
-        Block("13", "SEO + link gap", 3, "auto", phase3.b13_links),
+        Block("13", "SEO, links + AI visibility", 3, "auto", phase3.b13_links),
         Block("14", "GATE 2: Market gap?", 3, "gate", gates.memo2, ("go", "pivot", "kill")),
         Block("15", "Tools, costs, guardrails", 4, "auto", phase4.b15_costs),
         Block("16", "Unit economics + SWOT", 4, "auto", phase4.b16_economics),

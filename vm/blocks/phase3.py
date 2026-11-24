@@ -1,4 +1,5 @@
 """PHASE 3: COMPETITORS + MARKET (blocks 10-13). Facts about the real top-5 only."""
+import re
 from collections import defaultdict
 from typing import Literal, Optional
 
@@ -214,7 +215,7 @@ def b12_market(c):
     return Result("warn", summary + "; below the bar (bottom-up >= 10x goal AND an underserved segment)")
 
 
-# ---------------- 13 SEO + link gap ----------------
+# ---------------- 13 SEO + link gap + AI visibility ----------------
 def b13_links(c):
     comps = c.read("11_top_competitors.json")
     seo_rows, refs = [], {}
@@ -239,12 +240,81 @@ def b13_links(c):
     targets.sort(key=lambda t: (-t["links_to_n"], -t["dr"]))
     write_csv(c.path("15_link_targets.csv"), targets, ["domain", "dr", "links_to_n", "competitors"])
     c.write("15_competitor_seo.json", {"competitors": seo_rows})
+    ai_vis = ai_visibility(c, comps)
+    c.write("15_ai_visibility.json", ai_vis)
     drs = [num(s["dr"]) for s in seo_rows if s["dr"] is not None]
     dr_txt = ", ".join("%s %s" % (s["domain"], s["dr"]) for s in seo_rows)
     summary = (f"{len(targets)} link targets (link to >=2 competitors); competitor DR {dr_txt}; "
                f"median referring domains {int(median([num(s['referring_domains']) for s in seo_rows]))}")
+    summary += "; AI: %s" % ai_vis["headline"]
     if drs and min(drs) >= 70:
         return Result("warn", summary + "; all DR 70+: SEO is a 12+ month game")
     if len(targets) >= 20 and drs and min(drs) < 40:
         return Result("pass", summary)
     return Result("warn", summary + "; below the bar (>=20 targets AND a top competitor with DR < 40)")
+
+
+# ---------------- 13b AI visibility (part of block 13) ----------------
+ISO = {"uk": "GB"}
+
+
+def _mentioned(domain, text_low, cited):
+    """A rival counts as mentioned if its site is cited, its domain is written out, or its brand word appears
+    (brand word only when it is distinctive: no hyphen, 5+ letters, e.g. 'photoaid' but not 'passport-photo')."""
+    from ..seo import _sld
+    if domain in cited or domain in text_low:
+        return True
+    b = _sld(domain)
+    return "-" not in b and len(b) >= 5 and re.search(r"%s" % re.escape(b), text_low) is not None
+
+
+def ai_visibility(c, comps, n_prompts=4):
+    """Do ChatGPT, Perplexity and Google's AI Overviews recommend the rivals, and which sites do they quote?"""
+    clusters = c.read("10_clusters_serp.json")
+    heads = [cl["head"] for cl in clusters if cl["intent"] in ("buy", "brand-model")][:n_prompts] or [cl["head"] for cl in clusters[:n_prompts]]
+    prompts = [f"What is the best website or tool for {h}? Recommend specific sites." for h in heads]
+    if comps:
+        prompts.append(f"What are the best alternatives to {comps[0]['domain']}?")
+    iso = ISO.get(c.v["country"], c.v["country"].upper()) if not str(c.v["country"]).isdigit() else "US"
+    answers = []
+    for p in prompts:
+        for eng in ("chatgpt", "perplexity"):
+            try:
+                answers.append(seo.ai_answer(eng, p, iso))
+            except seo.DFSError as ex:
+                answers.append({"engine": eng, "prompt": p, "text": "", "cited": [], "error": str(ex)[:200]})
+    comp_domains = [x["domain"] for x in comps]
+    share = {d: 0 for d in comp_domains}
+    recommended = defaultdict(int)
+    for a in answers:
+        low = a["text"].lower()
+        for d in comp_domains:
+            if _mentioned(d, low, a["cited"]):
+                share[d] += 1
+        for d in a["cited"]:
+            recommended[d] += 1
+    # Google AI Overviews: re-read our SERPs (from cache, free) for the sites they cite
+    aio_total, aio_count, aio_sources = 0, 0, defaultdict(int)
+    for raw in c.read("09_serp_raw.json"):
+        if raw.get("error"):
+            continue
+        sr = seo.serp(raw["keyword"], c.loc, c.lang)
+        aio_total += 1
+        if sr["features"].get("ai_overview"):
+            aio_count += 1
+            for d in sr.get("ai_overview_sources") or []:
+                aio_sources[d] += 1
+    try:
+        mentions = seo.ai_sources(heads[0], c.loc, c.lang) if heads else {"sources": [], "brands": [], "answers": 0}
+    except seo.DFSError as ex:
+        mentions = {"sources": [], "brands": [], "answers": 0, "error": str(ex)[:200]}
+    ok = [a for a in answers if not a.get("error")]
+    top_rec = sorted(recommended.items(), key=lambda x: -x[1])[:15]
+    best = max(share.items(), key=lambda x: x[1]) if share else ("-", 0)
+    headline = (f"in {len(ok)} AI answers the top Google rival {best[0]} shows up {best[1]} times; AI recommends most: "
+                f"{', '.join(d for d, _ in top_rec[:3]) or 'nobody'}; Google AI answer on {aio_count}/{aio_total} searches")
+    return {"headline": headline, "prompts": prompts, "answers": [dict(a, text=a["text"][:1500]) for a in answers],
+            "rival_share": share, "answers_ok": len(ok), "ai_recommends": [{"site": d, "times": n} for d, n in top_rec],
+            "google_ai_overview": {"searches": aio_total, "with_ai_answer": aio_count,
+                                   "cited_sites": [{"site": d, "times": n} for d, n in sorted(aio_sources.items(), key=lambda x: -x[1])[:15]]},
+                                   "ai_trusted_sources": mentions}

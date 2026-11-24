@@ -5,7 +5,7 @@ The Venture Machine is an open-source tool that takes a business idea through **
 ```
 PHASE 1  IDEA FILTER          01 idea + duplicates  02 business, data, E-E-A-T  03 niche alive?  04 ICE + MVP   05 GATE 1 go/kill
 PHASE 2  DEMAND + SEO         06 seeds (30-60)  07 volume, CPC, cleaning  08 top-20 SERP + clusters  09 KD, shortlist, top-5 competitors
-PHASE 3  COMPETITORS + MARKET 10 UX audit  11 prices, models, ads  12 market size + buyers  13 SEO + link gap   14 GATE 2 go/pivot/kill
+PHASE 3  COMPETITORS + MARKET 10 UX audit  11 prices, models, ads  12 market size + buyers  13 SEO, links + AI visibility   14 GATE 2 go/pivot/kill
 PHASE 4  PLAN + GUARDRAILS    15 tools, costs, GUARDRAILS.md  16 unit economics + SWOT  17 product, sitemap, 90-day SEO   18 GATE 3 kill/test/go
 ```
 
@@ -21,6 +21,29 @@ PHASE 4  PLAN + GUARDRAILS    15 tools, costs, GUARDRAILS.md  16 unit economics 
 - **Fixed thresholds.** All pass/kill thresholds are written in the code before any results come in.
 
 A real idea usually costs **$0.30-1.50** in DataForSEO calls. Phase 1 costs a few cents.
+
+## What the findings PDF tells you
+
+A plain-language report anyone can read:
+- **The answer first:** build it / test it cheaply first / don't build it. Then the 7-point scorecard, the things to worry about, and what to do next.
+- **Is there demand?** Real Google searches, how hard each one is to rank for, and whether interest is growing.
+- **How hard is it to get onto Google, and how do you do it?** Each important search is rated Easy / Doable / Hard / Very hard, from three signals:
+  - keyword difficulty
+  - how strong the weakest site on page 1 is
+  - weak spots such as forums ranking
+
+  Each search gets a rough time and number of links needed. Then comes a step-by-step ranking plan.
+- **Do AI assistants recommend you?** The tool asks ChatGPT and Perplexity real buyer questions. It shows:
+  - which sites they recommend
+  - whether the rivals that rank on Google appear in those answers
+  - how often Google shows its own AI answer, and which sources these AI answers trust
+
+  It ends with how to get into AI answers.
+- **Rivals:** what they charge, and what they are weak and good at.
+- **Market size:** a careful estimate and a big-picture estimate.
+- **Money:** what you keep per sale, the most you can spend to win a customer, and whether ads would pay.
+- **Trust check and the plan.**
+- A glossary and every source used.
 
 ## Install (5 minutes)
 

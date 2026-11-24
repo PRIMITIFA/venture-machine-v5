@@ -62,7 +62,7 @@ STEP_NAMES = {
     "04": "Is it worth the effort?", "05": "Your decision #1", "06": "Brainstorm search words",
     "07": "How many people search?", "08": "What does Google show?", "09": "Pick the best keywords and rivals",
     "10": "How good are the rival websites?", "11": "What do rivals charge?", "12": "How big is the market?",
-    "13": "How strong is the rivals' SEO?", "14": "Your decision #2", "15": "Costs and safety rules",
+    "13": "How strong are the rivals, and does AI recommend them?", "14": "Your decision #2", "15": "Costs and safety rules",
     "16": "Does the money work?", "17": "The build plan", "18": "Your decision #3",
 }
 
@@ -84,6 +84,9 @@ GLOSSARY = [
     ("YMYL", "\"Your money or your life\": topics like health, money or law where Google is extra strict."),
     ("Link target", "A website that links to your competitors and might link to you too. Links make your site stronger."),
     ("Gate", "A point where the machine stops and you decide: go on, change direction, or stop."),
+    ("AI Overview", "The AI-written answer Google shows above the normal results for some searches. It quotes a few websites."),
+    ("AI visibility", "Whether ChatGPT, Perplexity or Google's AI mention or quote your site when people ask them for help."),
+    ("Indexed", "Google has stored your page and can show it. Pages that are not indexed get no Google visitors."),
 ]
 
 
@@ -213,6 +216,39 @@ QUESTIONS = {
     "kd_dr": "Can a new site get onto Google?", "weak_spots": "Are the rivals weak anywhere?", "advantage": "Do we have an edge?",
     "costs": "Is it cheap to run?",
 }
+
+
+LEVELS = [
+    ("Easy", GOOD, "1-3 months", "0-5 links"),
+    ("Doable", GOOD, "3-6 months", "5-20 links"),
+    ("Hard", CARE, "6-12 months", "20-50 links"),
+    ("Very hard", BAD, "12+ months", "50+ links"),
+]
+LEVEL_MEANING = ["A good, useful page is usually enough.", "Good page plus a handful of links.",
+                 "Needs real link building; start with easier searches first.", "Skip at the start; come back when the site is strong."]
+
+
+def rank_level(cl):
+    """How hard one search is to rank for, from 3 signals:
+    1) keyword difficulty (KD, 0-100), 2) the weakest site already on page 1, 3) weak spots (forums, thin pages).
+    Rule of thumb, not a promise."""
+    kd = cl.get("kd")
+    known = kd not in ("", None)
+    k = num(kd, 35) if known else 35
+    lvl = 0 if k <= 10 else 1 if k <= 30 else 2 if k <= 50 else 3
+    drs = [num(o["dr"]) for o in cl.get("top10", []) if o.get("dr")]  # 0 = no data, not "weak"
+    weakest = min(drs) if drs else None
+    reasons = ["difficulty %s/100" % (int(k) if known else "unknown")]
+    if weakest is not None:
+        reasons.append("weakest site on page 1 has strength %d" % weakest)
+    easier = (weakest is not None and weakest < 20) or any("forum" in w.lower() for w in cl.get("weak_spots", []))
+    if easier and lvl > 0:
+        lvl -= 1
+        reasons.append("a weak site or a forum already ranks, so a better page can get in")
+    if drs and min(drs) >= 60 and lvl < 3:
+        lvl += 1
+        reasons.append("every site on page 1 is strong (60+)")
+    return lvl, reasons
 
 
 def answer_of(v, data, n_done):
@@ -391,6 +427,42 @@ def build_html(slug):
                 H.append("<p><b>Newer words people now use:</b> %s</p>" % e(", ".join(pulse["rising_synonyms"])))
         end()
 
+    # ================= RANK: HOW HARD + HOW TO =================
+    if clusters:
+        section("How hard is it to get onto Google, and how do you do it?",
+                "How we judge difficulty, how hard each important search is, and the step-by-step way to rank.")
+        H.append(plain("We look at <b>3 things</b> for every search: <b>1)</b> keyword difficulty, a 0-100 score of how many strong links the pages "
+                       "on Google's first page have; <b>2)</b> how strong the <b>weakest</b> site on page 1 is (if a weak site is there, you can get in too); "
+                       "<b>3)</b> weak spots, like forum posts or thin pages ranking, which show Google is short of good answers. "
+                       "Together they give a rough time and how many websites need to link to you."))
+        lv_rows = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (pill(n, col), t, l, w)
+                          for (n, col, t, l), w in zip(LEVELS, LEVEL_MEANING))
+        H.append("<table><tr><th>Level</th><th>Time to page 1</th><th>Sites linking to you</th><th>What it means</th></tr>" + lv_rows
+                 + "</table><p class='small mute'>Rule of thumb from how SEO usually goes for a new site, not a promise.</p>")
+        ranked = [(rank_level(cl)[0], cl, rank_level(cl)[1]) for cl in clusters[:20]]
+        rows = [{"s": cl["head"], "v": "{:,}".format(int(cl["volume"])), "lvl": pill(LEVELS[lvl][0], LEVELS[lvl][1]),
+                 "t": LEVELS[lvl][2], "l": LEVELS[lvl][3], "w": "; ".join(why_)} for lvl, cl, why_ in ranked[:15]]
+        H.append("<h3>Your most valuable searches, rated</h3>" + table(rows, ["s", "v", "lvl", "t", "l", "w"],
+                 ["Search", "Searches a month", "How hard", "Time", "Links needed", "Why"], raw=("lvl",), right=("v",)))
+        easy = [cl for lvl, cl, _ in sorted(ranked, key=lambda x: (x[0], -x[1]["volume"])) if lvl <= 1]
+        n_links = len(links or [])
+        aiv0 = jf("15_ai_visibility.json") or {}
+        g0 = aiv0.get("google_ai_overview") or {}
+        aio_n, aio_of = (g0.get("with_ai_answer", 0), g0.get("searches", 0)) if g0 else (sum(1 for cl in clusters if (cl.get("features") or {}).get("ai_overview")), len(clusters))
+        steps = [
+            "Start with the easy ones. Build these pages first: %s." % (", ".join('"%s"' % cl["head"] for cl in easy[:5]) or "the lowest-difficulty searches in the plan"),
+            "One page per search topic, and make each one better than what ranks now: real data, a tool or a clear answer, not a copy of the others.",
+            "Beat the forum posts: where Reddit or forums rank, people still have questions. Answer them fully on your page.",
+            "Get links. %d sites already link to 2 or more of your rivals (appendix C). Ask them, starting with the strongest." % n_links,
+            "Link your own pages to each other, and point the strongest pages at your money page.",
+            "Go slowly with Google: about 10 pages in the first 1-2 months, then more. Bing can take more pages from the start.",
+            "Check at 4-6 weeks: if fewer than half your pages are indexed, stop adding pages and improve or merge the weak ones.",
+        ]
+        if aio_n:
+            steps.append("Google shows its own AI answer on %d of %d searches we checked. That takes clicks, so aim to be one of the sites that AI answer quotes (part on AI assistants)." % (aio_n, aio_of))
+        H.append("<h3>How to rank: the plan</h3><ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in steps) + "</ol>")
+        end()
+
     # ================= PART 3: RIVALS =================
     if comps or how:
         section("Who are you up against?", "The sites that already sell this, what they charge, and where they are weak.")
@@ -418,6 +490,50 @@ def build_html(slug):
             H.append("<h3>Others already charging for this</h3>" + table(cp, ["n", "p", "s"], ["Who", "What they charge", "Proof"], raw=("s",)))
         if biz and biz.get("audience_quotes"):
             H.append("<h3>What buyers say (real quotes)</h3><ul>" + "".join("<li>&ldquo;%s&rdquo; %s</li>" % (e(q["quote"]), link(q["url"], "source")) for q in biz["audience_quotes"][:8]) + "</ul>")
+        end()
+
+    # ================= AI: DO AI ASSISTANTS RECOMMEND YOU? =================
+    aiv = jf("15_ai_visibility.json")
+    if aiv:
+        section("Do AI assistants recommend you?",
+                "More people now ask ChatGPT, Perplexity or Google's AI instead of clicking links. Who do they recommend?")
+        rec = aiv.get("ai_recommends") or []
+        aio = aiv.get("google_ai_overview") or {}
+        share = aiv.get("rival_share") or {}
+        rivals_in = sum(1 for x in share.values() if x)
+        first_q = (aiv.get("prompts") or [""])[0]
+        H.append(plain("We asked ChatGPT and Perplexity <b>%d buyer questions</b> (like &ldquo;%s&rdquo;). They recommended <b>%s</b> most. "
+                       "Of the %d sites that rank best on Google, <b>%d</b> got mentioned by the AI at all. Google showed its own AI answer on "
+                       "<b>%s of %s</b> searches. <b>What this means:</b> ranking on Google is not enough any more; you also need to be one of the sites AI quotes."
+                       % (len(aiv.get("prompts") or []), e(first_q), e(", ".join(r["site"] for r in rec[:3]) or "nobody in particular"),
+                          len(share), rivals_in, aio.get("with_ai_answer", 0), aio.get("searches", 0))))
+        t1 = table([{"s": r["site"], "n": r["times"]} for r in rec[:12]], ["s", "n"], ["Site", "Times quoted"], right=("n",))
+        t2 = table([{"s": d_, "n": n_} for d_, n_ in sorted(share.items(), key=lambda x: -x[1])], ["s", "n"], ["Rival", "AI answers that mention it"], right=("n",))
+        H.append("<div class=two><div><h3>Sites AI recommends</h3>%s</div><div><h3>Google's top rivals in AI answers</h3>%s</div></div>" % (t1, t2))
+        trusted = (aiv.get("ai_trusted_sources") or {}).get("sources") or []
+        cited = [t for t in (aio.get("cited_sites") or []) if t["site"] not in ("google.com", "www.google.com")]
+        trusted = [t for t in trusted if t["site"] not in ("google.com", "www.google.com")]
+        if trusted or cited:
+            t3 = table([{"s": t["site"], "n": "{:,}".format(t["mentions"] or 0)} for t in trusted[:12]], ["s", "n"], ["Google AI cites most on this topic", "Times"], right=("n",))
+            t4 = table([{"s": t["site"], "n": t["times"]} for t in cited[:12]], ["s", "n"], ["Quoted in AI answers on our searches", "Times"], right=("n",))
+            H.append("<h3>Sources AI trusts</h3><p>Get mentioned on these (a listing, a review, a helpful answer, a video), because AI pulls its answers from them.</p>"
+                     + "<div class=two><div>%s</div><div>%s</div></div>" % (t3, t4))
+        tips = [
+            "Be listed where AI looks: the 'best X' articles, Reddit threads, YouTube videos and review sites in the tables above.",
+            "Put clear facts on your site: prices, specs, how it works, FAQs and a comparison with each rival, in plain text (not only images).",
+            "Add an llms.txt file and clean structured data so AI tools can read your site easily.",
+            "Get indexed by Bing as well as Google: ChatGPT's search leans on Bing.",
+            "Collect real reviews (Trustpilot and similar). AI repeats what reviews say.",
+            "Re-check every month: ask the same questions and see if you show up.",
+        ]
+        H.append("<h3>How to get into AI answers</h3><ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in tips) + "</ol>")
+        with_text = [a for a in aiv.get("answers") or [] if a.get("text")]
+        if with_text:
+            a = with_text[0]
+            clean = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", a["text"])
+            clean = re.sub(r"[*#]+", "", clean)
+            H.append("<h3>Example: what %s said</h3><div class=card><p class=small><b>Question:</b> %s</p><p class=small>%s</p></div>"
+                     % ("ChatGPT" if a["engine"] == "chatgpt" else "Perplexity", e(a["prompt"]), e(clean[:900] + ("..." if len(clean) > 900 else ""))))
         end()
 
     # ================= PART 4: MARKET =================

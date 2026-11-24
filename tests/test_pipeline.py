@@ -44,7 +44,8 @@ def fake_post(endpoint, task):
         base = sorted(DOMAINS, key=lambda d: hash((d, k[:6])) % 97)
         items = [{"type": "organic", "rank_group": i + 1, "domain": d, "url": f"https://{d}/{k[:10].replace(' ', '-')}" if i > 3 else f"https://{d}/",
                   "title": f"{k} tool" if i == 2 else f"{k} guide"} for i, d in enumerate(base)]
-        items += [{"type": "paid", "domain": "comp1.com", "title": "Get your sticker", "description": "From $9"}, {"type": "people_also_ask"}]
+        items += [{"type": "paid", "domain": "comp1.com", "title": "Get your sticker", "description": "From $9"}, {"type": "people_also_ask"},
+                  {"type": "ai_overview", "items": [{"type": "ai_overview_element", "references": [{"domain": "www.comp2.com", "url": "https://comp2.com"}]}]}]
         return [{"items": items}]
     if endpoint.endswith("bulk_keyword_difficulty/live"):
         return [{"items": [{"keyword": k, "keyword_difficulty": rnd.randint(0, 45)} for k in task["keywords"]]}]
@@ -58,6 +59,12 @@ def fake_post(endpoint, task):
         return [{"rank": 35, "backlinks": 5000, "referring_domains": 400}]
     if endpoint.endswith("referring_domains/live"):
         return [{"items": [{"domain": f"ref{i}.org", "rank": 60 - i, "backlinks": 3} for i in range(40)]}]
+    if endpoint.endswith("llm_responses/live"):
+        return [{"items": [{"type": "message", "sections": [{"type": "text", "text": "Try comp1.com or BestSnap.",
+                                                            "annotations": [{"url": "https://comp1.com/x"}, {"url": "https://bestsnap.io/"}]}]}],
+                 "search_results": [{"url": "https://reddit.com/r/x"}]}]
+    if endpoint.endswith("aggregated_metrics/live"):
+        return [{"total": {"sources_domain": [{"key": "www.reddit.com", "mentions": 40}], "brand_entities_title": [], "platform": [{"key": "google", "mentions": 40}]}}]
     raise AssertionError(endpoint)
 
 
@@ -141,7 +148,7 @@ class Pipeline(unittest.TestCase):
         for f in ("01_intake.md", "02_how_analysis.json", "03_eeat_quality.json", "04_niche_pulse.json", "05_scorecard.json",
                   "06_seeds.csv", "08_keywords_clean.csv", "09_serp_raw.json", "10_clusters_serp.json", "11_shortlist.csv",
                   "11_top_competitors.json", "12_competitor_ux.json", "13_competitor_business.json", "13_competitor_ads.md",
-                  "14_market_analysis.json", "15_competitor_seo.json", "15_link_targets.csv", "GUARDRAILS.md", "ACCESS.md",
+                  "14_market_analysis.json", "15_competitor_seo.json", "15_ai_visibility.json", "15_link_targets.csv", "GUARDRAILS.md", "ACCESS.md",
                   "OWNER-TODO.json", "16_owner_questions.md", "18_business_case.md", "18_swot.md", "19_business_plan.md",
                   "19_sitemap.json", "19_seo_calendar_90d.csv"):
             self.assertTrue((TMP / "ventures" / slug / f).exists(), f)
@@ -152,7 +159,8 @@ class Pipeline(unittest.TestCase):
         self.assertTrue(report.write(slug).exists())
         h = pdf.build_html(slug)
         for part in ("FINDINGS REPORT", "THE ANSWER", "The scorecard", "Is there demand?", "Who are you up against?",
-                     "How big is the money?", "Will it make money?", "The plan", "Glossary", "Sources", "IN PLAIN WORDS"):
+                     "How big is the money?", "Will it make money?", "The plan", "Glossary", "Sources", "IN PLAIN WORDS",
+                     "How hard is it to get onto Google", "How to rank: the plan", "Do AI assistants recommend you?"):
             self.assertIn(part, h)
         f, msg = pdf.write(slug)  # a real PDF if a browser is installed, else a clear message
         self.assertTrue(f is None or f.stat().st_size > 1000, msg)
