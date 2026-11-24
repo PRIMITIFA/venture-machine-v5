@@ -1,0 +1,7 @@
+.env
+house_rules.md
+data/
+ventures/
+__pycache__/
+*.pyc
+.pytest_cache/

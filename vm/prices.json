@@ -1,0 +1,20 @@
+{
+  "_note": "Standard stack price list used by block 15. Edit to match your own stack. USD. Checked 2026; verify before you buy.",
+  "stack": [
+    {"name": "Domain (.com)", "purpose": "the site", "cost_start_usd_month": 1.1, "cost_10x_usd_month": 1.1, "limit": "1 domain, ~$13/year", "account_owner": "owner"},
+    {"name": "Cloudflare Workers + D1 + R2", "purpose": "hosting, database, files", "cost_start_usd_month": 0, "cost_10x_usd_month": 5, "limit": "free: 100k requests/day; paid plan $5/mo", "account_owner": "owner"},
+    {"name": "Payment provider (Dodo / Stripe / Paddle)", "purpose": "checkout", "cost_start_usd_month": 0, "cost_10x_usd_month": 0, "limit": "~4-5% + $0.40 per sale (merchant of record)", "account_owner": "owner", "fee_pct": 5.0, "fee_fixed_usd": 0.40},
+    {"name": "Resend", "purpose": "transactional email", "cost_start_usd_month": 0, "cost_10x_usd_month": 20, "limit": "free 100/day, 3k/month", "account_owner": "owner"},
+    {"name": "Google Analytics 4 + Search Console + Bing Webmaster", "purpose": "analytics, indexing", "cost_start_usd_month": 0, "cost_10x_usd_month": 0, "limit": "free", "account_owner": "owner"},
+    {"name": "DataForSEO", "purpose": "keyword, SERP and backlink data", "cost_start_usd_month": 5, "cost_10x_usd_month": 20, "limit": "pay as you go, $50 minimum top-up", "account_owner": "owner"},
+    {"name": "Claude (API or subscription)", "purpose": "AI for research, content, build", "cost_start_usd_month": 20, "cost_10x_usd_month": 100, "limit": "per token or plan limits", "account_owner": "owner"},
+    {"name": "GitHub", "purpose": "code, guardrails, lessons", "cost_start_usd_month": 0, "cost_10x_usd_month": 0, "limit": "free private repos", "account_owner": "owner"}
+  ],
+  "marketing": [
+    {"channel": "Cold email (warmed inboxes)", "unit_cost": "~$3.50 per inbox/month + domains", "default_cap": "30-50 emails per inbox per day", "pass": ">= 3% positive replies", "kill": "< 1% positive after 300 sends or bounce > 2%"},
+    {"channel": "Directories / launch sites", "unit_cost": "$0-50 each", "default_cap": "10 listings", "pass": "listed + referral visits", "kill": "no traffic after 30 days"},
+    {"channel": "Affiliates / partners", "unit_cost": "20-35% of each sale only", "default_cap": "commission only, no upfront fee", "pass": ">= 1 sale per partner per month", "kill": "0 sales in 60 days"},
+    {"channel": "Google / Microsoft search ads", "unit_cost": "CPC from block 07", "default_cap": "$5-20/day, max loss $100 per channel test (14 days)", "pass": "CPA <= max CAC from block 16", "kill": "spent 2x target CPA with 0 sales"},
+    {"channel": "SEO pages + link outreach", "unit_cost": "AI + time", "default_cap": "per index ramp", "pass": "indexed + impressions growing in 4-6 weeks", "kill": "< 50% indexed after 6 weeks"}
+  ]
+}

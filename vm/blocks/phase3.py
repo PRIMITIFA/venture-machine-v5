@@ -1,0 +1,250 @@
+"""PHASE 3: COMPETITORS + MARKET (blocks 10-13). Facts about the real top-5 only."""
+from collections import defaultdict
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field
+
+from .. import ai, seo, web
+from ..config import S
+from ..pipeline import Result
+from ..util import md_table, median, num, read_csv, write_csv
+
+
+# ---------------- 10 Top-5 UX audit ----------------
+class UxOne(BaseModel):
+    domain: str
+    steps_to_checkout_estimate: Optional[int] = Field(default=None, description="estimate from the pages seen; null if unknown")
+    weaknesses: list[str] = Field(description="concrete, e.g. '6 steps to pay, no sample report'")
+    strengths: list[str]
+
+
+class Ux(BaseModel):
+    competitors: list[UxOne]
+
+
+def b10_ux(c):
+    comps = c.read("11_top_competitors.json")
+    shots_dir = c.path("shots")
+    shots_dir.mkdir(exist_ok=True)
+    facts, images, manual = [], [], []
+    for x in comps:
+        d = x["domain"]
+        p = web.fetch(d)
+        sig = web.signals(p["html"])
+        pricing = next((u for u, label in web.links_of(p["html"], p["url"]) if "pric" in u.lower() or "plan" in u.lower()), "")
+        sm = web.sitemap(d)
+        shots = web.screenshots(p["url"], str(shots_dir / d.replace(".", "_"))) if p["status"] == 200 else []
+        images += shots[:2]
+        if web.blocked(p):
+            manual.append(d)
+        facts.append({"domain": d, "status": p["status"], "load_ms": p["ms"], "kb": p["bytes"] // 1024, "title": web.title_of(p["html"]),
+                      "trust": sig["trust"], "checkout_provider": sig["checkout"], "mobile_viewport": sig["mobile_viewport"],
+                      "pricing_page": pricing, "sitemap_urls": sm["urls"], "sitemap_oldest": sm["oldest"], "sitemap_newest": sm["newest"],
+                      "blocked_or_captcha": d in manual, "screenshots": shots, "text": web.text_of(p["html"], 2500)})
+    out = ai.ask_json(
+        f"""Block 10. UX + trust audit of the top-5 competitors of: {c.v['one_liner']}
+For each: estimate steps from landing to payment (from the pages and screenshots; null if unknown), list concrete
+weaknesses (missing sample, no reviews, slow, no prices, many steps, weak mobile, old site...) and strengths.
+Use only what the data and screenshots show.{c.note()}""",
+        Ux, smart=False, images=images[:6], context={"measured": [{k: v for k, v in f.items() if k != "screenshots"} for f in facts]})
+    by = {u.domain: u.model_dump() for u in out.competitors}
+    rows = [dict(f, **{k: v for k, v in by.get(f["domain"], {}).items() if k != "domain"}) for f in facts]
+    for r in rows:
+        r.pop("text", None)
+    c.write("12_competitor_ux.json", {"competitors": rows, "manual_review_at_gate2": manual})
+    n_weak = sum(len(r.get("weaknesses") or []) for r in rows)
+    summary = f"{n_weak} concrete weaknesses across {len(rows)} competitors" + (f"; blocked (check by hand at gate 2): {', '.join(manual)}" if manual else "")
+    if n_weak >= 2:
+        return Result("pass", summary)
+    return Result("warn", summary + "; they are strong: the edge must come from price, data or B2B (block 11)")
+
+
+# ---------------- 11 Prices, models, ads ----------------
+class Plan(BaseModel):
+    name: str
+    price: str
+    billing: Literal["one-time", "monthly", "yearly", "usage", "free", "custom", "unknown"]
+
+
+class Biz(BaseModel):
+    domain: str
+    plans: list[Plan]
+    free_tier: str
+    upsells: list[str]
+    b2b_or_api: str
+    checkout_provider: str
+    trial_refunds: str
+    affiliate_or_ads_networks: str
+    source_urls: list[str]
+
+
+class Quote(BaseModel):
+    quote: str
+    url: str
+
+
+class Business(BaseModel):
+    competitors: list[Biz]
+    long_running_ads: list[str] = Field(description="ads seen running 30+ days (Meta Ad Library / Google Ads Transparency): advertiser, angle, offer, URL. Empty if not verifiable")
+    audience_quotes: list[Quote] = Field(description="real buyer quotes with the URL where they were said")
+    identified_gap: str = Field(description="ONE line: the gap we can own (price, product, subscription/B2B/API, ignored audience, UX)")
+    competitors_cheaper_than_our_data_cost_and_better_data: bool
+    reason: str
+
+
+def b11_business(c):
+    comps = c.read("11_top_competitors.json")
+    ux = c.read("12_competitor_ux.json")
+    how = c.read("02_how_analysis.json")
+    raw = c.read("09_serp_raw.json")
+    paid = defaultdict(list)
+    for s in raw:
+        for p in s.get("paid") or []:
+            paid[p["domain"]].append({"keyword": s["keyword"], "title": p["title"], "description": p["description"]})
+    pages = {}
+    for x in ux["competitors"]:
+        if x.get("pricing_page"):
+            p = web.fetch(x["pricing_page"])
+            pages[x["domain"]] = {"url": p["url"], "text": web.text_of(p["html"], 4000)} if p["status"] == 200 else {"url": x["pricing_page"], "text": f"status {p['status']}"}
+    out = ai.ask_json(
+        f"""Block 11. For each top-5 competitor of "{c.v['one_liner']}": all products, prices, plans, free tier, upsells,
+B2B/API, checkout provider, trial/refunds, affiliate or ad networks. Use the pricing pages given and web search; cite URLs.
+Then look for ads that have run 30+ days (Meta Ad Library, Google Ads Transparency Center) - only list what you verified.
+Collect real buyer quotes (Reddit, reviews, forums) with URLs and write ONE identified_gap line.
+Our data sources and their cost are in 'how'. Say if competitors sell cheaper than our data cost AND have better data.{c.note()}""",
+        Business, web=True, smart=True,
+        context={"competitors": comps, "pricing_pages": pages, "how": {"data_sources": how["data_sources"], "competitors_02": how["competitors"]},
+                 "google_ads_seen_in_our_serps": dict(paid), "ux": [{k: x.get(k) for k in ("domain", "checkout_provider", "weaknesses")} for x in ux["competitors"]]})
+    d = out.model_dump() | {"google_ads_in_serps": dict(paid)}
+    c.write("13_competitor_business.json", d)
+    md = ["# 13 Competitor ads\n", "## Google search ads seen in our SERPs (DataForSEO, real)\n"]
+    for dom, ads in paid.items():
+        md.append(f"### {dom} ({len(ads)} ads)\n" + md_table(ads[:10], ["keyword", "title", "description"]))
+    md.append("\n## Long-running ads (30+ days, from ad libraries)\n" + ("\n".join(f"- {a}" for a in out.long_running_ads) or "_none verified_"))
+    c.write("13_competitor_ads.md", "\n".join(md))
+    summary = f"gap: {out.identified_gap}; {sum(len(x.plans) for x in out.competitors)} plans priced; {len(paid)} advertisers on our keywords"
+    if out.competitors_cheaper_than_our_data_cost_and_better_data:
+        return Result("kill", summary + f"; competitors sell below our data cost with better data: {out.reason}")
+    if not out.identified_gap.strip():
+        return Result("redo", "no clear gap written")
+    return Result("pass", summary)
+
+
+# ---------------- 12 Market size + buyers ----------------
+CTR_TOP5 = 0.28 + 0.15 + 0.10 + 0.07 + 0.05  # typical organic CTR of positions 1-5
+
+
+def parse_prices(text):
+    """'$29 one-time', '£6.99', 'from €4.99' -> [29.0, 6.99*1.27, 4.99*1.08] in USD (rough FX)."""
+    import re
+    fx = {"$": 1.0, "£": 1.27, "€": 1.08}
+    out = []
+    for cur, val in re.findall(r"([$£€])\s?(\d+(?:[.,]\d{1,2})?)", str(text)):
+        out.append(round(float(val.replace(",", ".")) * fx[cur], 2))
+    return out
+
+class Segment(BaseModel):
+    name: str
+    size_note: str
+    pain_quotes: list[Quote]
+    underserved: bool
+
+
+class Market(BaseModel):
+    top_down_usd_year: float = Field(description="buyers x price per year, from cited sources; 0 if unknown")
+    top_down_method: str
+    top_down_sources: list[str]
+    typical_price_usd: float = Field(description="typical price per sale/month from block 11 data")
+    segments: list[Segment]
+    underserved_countries_or_segments: list[str]
+    growth_direction: Literal["growing", "flat", "shrinking", "unknown"]
+    growth_evidence: str
+
+
+def b12_market(c):
+    comps = c.read("11_top_competitors.json")
+    biz = c.read("13_competitor_business.json")
+    short = read_csv(c.path("11_shortlist.csv"))
+    tr = seo.traffic([x["domain"] for x in comps], c.loc, c.lang)
+    heads = [r["keyword"] for r in short if r["role"] == "main"][:5]
+    by_country = {}
+    for cc in S.market_countries:
+        if cc == c.v["country"]:
+            continue
+        try:
+            from ..config import location_code, COUNTRY_LANG
+            vols = seo.search_volume(heads, location_code(cc), COUNTRY_LANG.get(cc, "en"))
+            by_country[cc] = int(sum(num(v.get("search_volume")) for v in vols))
+        except seo.DFSError as e:
+            by_country[cc] = f"error: {e}"
+    by_country[c.v["country"]] = int(sum(num(r["volume"]) for r in short if r["role"] == "main"))
+    out = ai.ask_json(
+        f"""Block 12. Market size and buyers for: {c.v['one_liner']}
+1) TOP-DOWN: number of buyers x price per year, each number with a source URL (web search).
+2) Typical price from the competitor pricing data.
+3) Buyer segments with real pain quotes (Trustpilot, app stores, Reddit, forums) and URLs; mark underserved ones.
+4) Countries/segments that are underserved; growth direction with evidence.{c.note()}""",
+        Market, web=True, smart=True, context={"competitor_pricing": biz["competitors"], "search_volume_by_country_main_keywords": by_country})
+    conv = S.assumed_conversion
+    # niche clicks: what the top-5 results get from OUR buying keywords (volume x organic CTR of positions 1-5)
+    kws = read_csv(c.path("08_keywords_clean.csv"))
+    clicks = sum(num(k["volume"]) * CTR_TOP5 for k in kws if k["intent"] in ("buy", "competitor", "brand-model"))
+    price, price_src = out.typical_price_usd, "AI from block 11 pricing"
+    if not price:
+        seen = [p for x in biz["competitors"] for pl in x["plans"] for p in parse_prices(pl["price"])]
+        seen += [p for x in c.read("02_how_analysis.json")["competitors"] for p in parse_prices(x["price"])]
+        price, price_src = median(seen), f"median of {len(seen)} competitor prices seen in blocks 02/11"
+    bottom_up = clicks * conv * price * 12
+    goal = S.year1_goal_usd
+    d = {"bottom_up_usd_year": round(bottom_up),
+         "bottom_up_method": f"buying searches/mo x top-5 CTR {CTR_TOP5:.0%} = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) x ${price:.2f} ({price_src}) x 12",
+         "competitor_domain_traffic": tr, "search_volume_by_country": by_country, "year1_goal_usd": goal, **out.model_dump()}
+    d["typical_price_usd"] = price
+    big, small = max(bottom_up, out.top_down_usd_year), min(bottom_up, out.top_down_usd_year)
+    d["methods_differ_10x"] = bool(small and big / small > 10)
+    c.write("14_market_analysis.json", d)
+    summary = (f"bottom-up ${bottom_up:,.0f}/yr, top-down ${out.top_down_usd_year:,.0f}/yr vs goal ${goal:,.0f}; "
+               f"underserved: {', '.join(out.underserved_countries_or_segments[:3])[:300] or 'none'}")
+    if not price:
+        return Result("warn", summary + "; no competitor price found, market size unknown: check prices by hand at gate 2")
+    if big < goal:
+        return Result("kill", summary + "; the whole market is smaller than the year-1 goal")
+    if bottom_up >= 10 * goal and out.underserved_countries_or_segments:
+        return Result("warn" if d["methods_differ_10x"] else "pass", summary + ("; methods differ >10x (flag in SWOT)" if d["methods_differ_10x"] else ""))
+    return Result("warn", summary + "; below the bar (bottom-up >= 10x goal AND an underserved segment)")
+
+
+# ---------------- 13 SEO + link gap ----------------
+def b13_links(c):
+    comps = c.read("11_top_competitors.json")
+    seo_rows, refs = [], {}
+    for x in comps:
+        d = x["domain"]
+        s = seo.backlinks_summary(d)
+        s["top_pages"] = seo.top_pages(d, c.loc, c.lang, limit=10)
+        s["free_tool_pages"] = [p["url"] for p in s["top_pages"] if any(w in (p["url"] or "").lower() for w in ("tool", "calculator", "checker", "free", "generator", "lookup"))]
+        seo_rows.append(s)
+        refs[d] = seo.referring_domains(d, limit=300)
+    links = defaultdict(lambda: {"dr": 0, "competitors": []})
+    comp_set = {x["domain"] for x in comps}
+    for d, lst in refs.items():
+        for r in lst:
+            rd = r["domain"]
+            if not rd or rd in comp_set:
+                continue
+            links[rd]["dr"] = max(links[rd]["dr"], num(r["dr"]))
+            links[rd]["competitors"].append(d)
+    targets = [{"domain": k, "dr": int(v["dr"]), "links_to_n": len(v["competitors"]), "competitors": v["competitors"]}
+               for k, v in links.items() if len(v["competitors"]) >= 2]
+    targets.sort(key=lambda t: (-t["links_to_n"], -t["dr"]))
+    write_csv(c.path("15_link_targets.csv"), targets, ["domain", "dr", "links_to_n", "competitors"])
+    c.write("15_competitor_seo.json", {"competitors": seo_rows})
+    drs = [num(s["dr"]) for s in seo_rows if s["dr"] is not None]
+    dr_txt = ", ".join("%s %s" % (s["domain"], s["dr"]) for s in seo_rows)
+    summary = (f"{len(targets)} link targets (link to >=2 competitors); competitor DR {dr_txt}; "
+               f"median referring domains {int(median([num(s['referring_domains']) for s in seo_rows]))}")
+    if drs and min(drs) >= 70:
+        return Result("warn", summary + "; all DR 70+: SEO is a 12+ month game")
+    if len(targets) >= 20 and drs and min(drs) < 40:
+        return Result("pass", summary)
+    return Result("warn", summary + "; below the bar (>=20 targets AND a top competitor with DR < 40)")
