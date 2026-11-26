@@ -25,7 +25,7 @@ PRICES = {  # USD per 1M tokens (input, output)
 }
 WEB_SEARCH_USD = 0.01
 
-SYSTEM = """You are the research engine of Zero to Launch, a strict process that takes a business idea to a
+SYSTEM = """You are the research engine of The Venture Machine, a strict process that takes a business idea to a
 validated plan. Golden rules:
 1. Never invent numbers. Every volume, price, traffic, revenue or count must come from the data given to you or
    from a web page you actually opened, with its URL. If you do not know, say "unknown" and lower confidence.

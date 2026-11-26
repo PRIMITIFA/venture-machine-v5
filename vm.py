@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Zero to Launch. Usage: python vm.py help"""
+"""The Venture Machine v5. Usage: python vm.py help"""
 import sys
 
 from vm.cli import main

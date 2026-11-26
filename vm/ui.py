@@ -46,8 +46,8 @@ def home():
         rows += (f"<tr><td><a href='/v/{e(v['slug'])}'>{e(v['one_liner'] or v['idea'])}</a><div class=mute>{e(v['slug'])} &middot; {e(v['data'].get('depth', 'full'))}</div></td>"
                  f"<td>{e(st)}</td><td>{done}/18</td><td>${store.spent(v['slug']):.2f}</td></tr>")
     opts = "".join(f"<option value='{c}'{' selected' if c == 'us' else ''}>{c.upper()}</option>" for c in LOCATIONS if c != "uk")
-    return report.page("Zero to Launch", f"""
-<h1>Zero to Launch</h1><p class=mute>Check any business idea with real Google data. Pick a quick check (minutes, cents) or a full / deep check (rivals, AI assistants, market, money, plan).</p>
+    return report.page("Venture Machine", f"""
+<h1>Venture Machine</h1><p class=mute>Check any business idea with real Google data. Pick a quick check (minutes, cents) or a full / deep check (rivals, AI assistants, market, money, plan).</p>
 <div class=card><form method=post action=/new>
 <label>Idea (who wants what, and what would they pay for?)</label>
 <textarea name=idea rows=3 required placeholder="People who buy used cars want the original window sticker and would pay $15 for it"></textarea>
@@ -177,7 +177,7 @@ class H(BaseHTTPRequestHandler):
 def serve(port=8765):
     srv = ThreadingHTTPServer(("127.0.0.1", port), H)
     url = f"http://127.0.0.1:{port}"
-    print(f"Zero to Launch running at {url}  (Ctrl+C to stop)")
+    print(f"Venture Machine running at {url}  (Ctrl+C to stop)")
     try:
         webbrowser.open(url)
     except Exception:

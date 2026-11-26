@@ -464,7 +464,7 @@ def build_html(slug):
 
     # ================= THE SIMPLE REPORT (page 1-2) =================
     level = {"light": "QUICK CHECK", "full": "FULL CHECK", "deep": "DEEP CHECK"}.get(depth, "FULL CHECK")
-    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>ZERO TO LAUNCH &middot; %s REPORT &middot; %s</div>" % (level, e(store.now()[:10])))
+    H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; %s REPORT &middot; %s</div>" % (level, e(store.now()[:10])))
     H.append("<h1>%s</h1>" % e(v["one_liner"] or v["idea"]))
     H.append("<p class=mute>Checked for: %s &middot; Steps done: %d of 18 &middot; Data bought: %s</p>"
              % (e(v["country"].upper()), n_done, money(store.spent(slug))))
