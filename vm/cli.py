@@ -97,7 +97,7 @@ def cmd_ui(a):
 
 def main(argv=None):
     load_env()
-    p = argparse.ArgumentParser(prog="vm", description="The Venture Machine v5, phases 1-4 (blocks 01-18).")
+    p = argparse.ArgumentParser(prog="vm", description="Zero to Launch, phases 1-4 (blocks 01-18).")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("new", help="add an idea")
     s.add_argument("idea")

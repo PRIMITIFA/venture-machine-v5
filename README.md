@@ -1,6 +1,6 @@
-# The Venture Machine v5: from idea to validated plan
+# Zero to Launch: from idea to validated plan
 
-The Venture Machine is an open-source tool that takes a business idea through **phases 1-4 (blocks 01-18)** of the 28-block Venture Machine process. Along the way it gathers real search data, finds the real competitors, sizes the market, checks costs and sets the guardrails. It stops at **3 owner gates**, where you decide GO, KILL, PIVOT or TEST.
+Zero to Launch is an open-source tool that takes a business idea through **phases 1-4 (blocks 01-18)** of a 28-block idea-to-business process. Along the way it gathers real search data, finds the real competitors, sizes the market, checks costs and sets the guardrails. It stops at **3 owner gates**, where you decide GO, KILL, PIVOT or TEST.
 
 ```
 PHASE 1  IDEA FILTER          01 idea + duplicates  02 business, data, E-E-A-T  03 niche alive?  04 ICE + MVP   05 GATE 1 go/kill
@@ -78,8 +78,8 @@ A plain-language report anyone can read:
 You need **Python 3.10+**.
 
 ```bash
-git clone https://github.com/<you>/venture-machine.git
-cd venture-machine
+git clone https://github.com/PRIMITIFA/zero-to-launch.git
+cd zero-to-launch
 pip install -r requirements.txt
 cp .env.example .env              # Windows: copy .env.example .env
 cp house_rules.example.md house_rules.md
