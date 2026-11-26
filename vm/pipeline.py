@@ -1,7 +1,12 @@
 """The 28-block chain (this repo runs phases 1-4 = blocks 01-18), its state machine and the owner gates.
 
 Block states: PENDING -> RUNNING -> VALIDATED | RETRY -> ALERT
-Block verdicts: pass | warn (continue, noted) | redo (retry, max 2) | kill (stop; owner must confirm or override)
+Block verdicts: pass | warn (continue, noted) | fail (the block's own bar was missed: continue, shown in red and counted
+against the idea) | redo (retry, max 2) | kill (stop; owner must confirm or override)
+
+Every block has a version and a list of the blocks it reads from. When a rule changes (version bump or a changed setting),
+the blocks that used the old rule and everything that reads from them are out of date: `vm run` re-runs them, and no
+decision can be made on an out-of-date report.
 """
 import json
 import traceback
@@ -13,7 +18,7 @@ from .config import S, location_code
 
 @dataclass
 class Result:
-    verdict: str  # pass | warn | redo | kill
+    verdict: str  # pass | warn | fail | redo | kill
     summary: str
     data: dict = field(default_factory=dict)
 
@@ -31,8 +36,9 @@ class Block:
 class Ctx:
     """What a block gets: the venture, its folder, file helpers, codes and the last retry feedback."""
 
-    def __init__(self, slug, feedback=""):
+    def __init__(self, slug, feedback="", attempt=1):
         self.slug = slug
+        self.attempt = attempt
         self.v = store.venture(slug)
         self.dir = S.ventures_dir / slug
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +133,7 @@ def _run_block(b, slug, say):
         budget.CURRENT.update(slug=slug, block=b.id)
         say(f"[{b.id}] {b.name} ...")
         try:
-            res = b.run(Ctx(slug, feedback))
+            res = b.run(Ctx(slug, feedback, attempts))
         except budget.BudgetExceeded as e:
             store.set_block(slug, b.id, status="ALERT", error=str(e), finished=store.now())
             store.update_venture(slug, status="alert")
@@ -149,8 +155,11 @@ def _run_block(b, slug, say):
         finally:
             budget.CURRENT.update(slug=None, block=None)
         store.log(slug, res.verdict, f"{b.id}: {res.summary}")
-        if res.verdict in ("pass", "warn"):
+        if res.verdict in ("pass", "warn", "fail"):
             store.set_block(slug, b.id, status="VALIDATED", verdict=res.verdict, summary=res.summary, finished=store.now())
+            sigs = dict(store.venture(slug)["data"].get("block_sig") or {})
+            sigs[b.id] = block_sig(b.id)
+            store.set_data(slug, block_sig=sigs)
             say(f"[{b.id}] {res.verdict.upper()}: {res.summary}")
             return True
         if res.verdict == "redo":
@@ -184,6 +193,10 @@ def run(slug, say=print, stop_at_gate=True):
     from .config import ACTIVE, LIGHT_BLOCKS
     depth = v["data"].get("depth", "full")
     ACTIVE["depth"] = depth
+    resync(slug)
+    old = refresh(slug)
+    if old:
+        say("out of date (a rule or an earlier step changed), running again: " + ", ".join(old))
     store.update_venture(slug, status="running")
     for b in registry():
         st = store.block(slug, b.id)
@@ -243,6 +256,13 @@ def gate(slug, decision, note=""):
         return try_angle(slug, note)
     if not v["status"].startswith("gate_"):
         raise SystemExit(f"{slug} is not waiting at a gate (status: {v['status']})")
+    if stale(slug):
+        raise SystemExit(f"{slug}: steps {', '.join(stale(slug))} are out of date (a rule changed since they ran). "
+                         f"Refresh first: vm run {slug}   (or stop the idea: vm gate {slug} kill)")
+    problems = v["data"].get("consistency_problems") or []
+    if v["status"] == "gate_18" and problems and decision in ("go", "test"):
+        raise SystemExit(f"{slug}: the report is NOT CONSISTENT ({len(problems)} problems, first: {problems[0]}). "
+                         f"Fix by re-running the plan: vm rerun {slug} 16 && vm run {slug}   (or stop the idea: vm gate {slug} kill)")
     gid = v["status"].removeprefix("gate_")
     b = by_id()[gid]
     if decision not in b.decisions:
@@ -275,7 +295,7 @@ def _against(slug, v, gid, decision):
     if decision != "go":
         return ""
     d, bl = v["data"], store.blocks(slug)
-    warned = lambda ids: [b for b in ids if bl.get(b, {}).get("verdict") == "warn"]
+    warned = lambda ids: [b for b in ids if bl.get(b, {}).get("verdict") in ("warn", "fail")]
     if gid == "05" and d.get("first_score100") is not None and d["first_score100"] < 60:
         return f"GO although the first-look score was WEAK ({d['first_score100']}/100)"
     if gid == "14" and warned(("07", "08", "09", "10", "11", "12", "13")):
@@ -284,6 +304,70 @@ def _against(slug, v, gid, decision):
     if gid == "18" and rec and not rec.startswith("FULL"):
         return f"GO although the recommendation was {rec.split(' (')[0]}"
     return ""
+
+
+# ---------------- out-of-date steps ----------------
+# bump a number when a block's rules change: every idea that ran the older version is then out of date from that block on
+BLOCK_VERSIONS = {"03": 2, "12": 3, "13": 3, "16": 3, "17": 3}
+# what each block reads from (a block is out of date when one of these was re-run or is itself out of date)
+DEPS = {"02": ["01"], "03": ["01", "02"], "04": ["01", "02", "03"], "05": ["04"], "06": ["01", "02"], "07": ["06"], "08": ["07"],
+        "09": ["08"], "10": ["09"], "11": ["09", "02"], "12": ["08", "09", "11"], "13": ["08", "09"], "14": ["10", "11", "12", "13"],
+        "15": ["02", "11", "12", "13"], "16": ["15", "12", "08", "09", "04"], "17": ["16", "13", "12", "08"], "18": ["15", "16", "17"]}
+GATES = ("05", "14", "18")
+
+
+def block_sig(bid):
+    """Version of a block's rules plus the settings its numbers depend on."""
+    s = str(BLOCK_VERSIONS.get(bid, 1))
+    if bid in ("12", "16", "17"):
+        s += f"|{S.min_market_month:g}|{S.target_market_month:g}|{S.assumed_conversion:g}|{S.good_case_share:g}"
+    return s
+
+
+def stale(slug):
+    """Blocks that are done but out of date: they ran under older rules, or read from a block that is out of date."""
+    v = store.venture(slug)
+    if not v or v["status"] == "killed":
+        return []
+    sigs, bl = v["data"].get("block_sig") or {}, store.blocks(slug)
+    done = lambda b: bl.get(b, {}).get("status") == "VALIDATED" and not (bl[b].get("summary") or "").startswith("skipped")
+    out = set()
+    for b in registry():
+        if b.kind == "gate" or not done(b.id):
+            continue
+        have = sigs.get(b.id) or "1"      # blocks from before signatures existed count as version 1
+        want = block_sig(b.id)
+        if (have != want and (b.id in sigs or BLOCK_VERSIONS.get(b.id, 1) > 1)) or any(d in out for d in DEPS.get(b.id, [])):
+            out.add(b.id)
+    return sorted(out)
+
+
+def refresh(slug):
+    """Reset the out-of-date blocks so the next run redoes them. Decisions already made at gates 1 and 2 stay; gate 3 is asked again."""
+    old = stale(slug)
+    if not old:
+        return []
+    ids = list(old)
+    if store.block(slug, "18")["status"] != "PENDING":
+        ids.append("18")
+    store.reset_blocks(slug, ids)
+    store.set_data(slug, consistency_problems=[])
+    store.log(slug, "refresh", "out of date, reset: " + ", ".join(ids))
+    return old
+
+
+def resync(slug):
+    """Rebuild the one-line results that are pure arithmetic on stored files (steps 03 and 07), so they cannot lag behind the data."""
+    import re
+    from .blocks import phase1, phase2
+    c = Ctx(slug)
+    if store.block(slug, "08")["status"] == "VALIDATED":
+        phase2.sync_kw_summary(c)
+    st = store.block(slug, "03")
+    if st["status"] == "VALIDATED" and c.has("04_niche_pulse.json"):
+        new = re.sub(r"^(alive|flat|dying|unknown); 24-month trend [^;]*", lambda m: phase1.pulse_line(c.read("04_niche_pulse.json")), st.get("summary") or "")
+        if new != st.get("summary"):
+            store.set_block(slug, "03", summary=new)
 
 
 def try_angle(slug, note=""):

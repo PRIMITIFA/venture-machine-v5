@@ -209,14 +209,29 @@ Competitors already known: {[x['url'] for x in how['competitors']]}{c.note()}"""
         status = "flat"
     pulse = {"status": status, "change_24m_pct_best": best, "trend": trend, "ads_on_top_term": ads,
              "advertisers": ads_domains, **out.model_dump(), "measure_errors": err.strip()}
+    kwt = c.v["data"].get("kw_trend_12m_pct")  # measured later by step 09; kept when this step is re-run
+    if kwt is not None:
+        pulse["kw_trend_12m_pct"] = kwt
+        if status == "unknown":
+            status = pulse["status"] = "alive" if kwt >= -10 else "flat" if kwt >= -30 else "dying"
+            pulse["status_source"] = "our own keywords' searches over 12 months (Google Ads numbers)"
     c.write("04_niche_pulse.json", pulse)
-    summary = (f"{status}; 24-month trend {best if best is not None else 'n/a'}%; ads on '{terms[0]}': {ads}; "
+    summary = (f"{pulse_line(pulse)}; ads on '{terms[0]}': {ads}; "
                f"{len(out.fresh_discussions_90d)} fresh discussions; {len(out.new_competitors_12m)} new players")
     if status == "dying":
         return Result("kill", summary)
     if status == "unknown":
         return Result("warn", summary + "; no trend data, no ads and no fresh discussions: demand is UNKNOWN, not proven")
     return Result("pass" if status == "alive" else "warn", summary)
+
+
+def pulse_line(pulse):
+    """Status and what it rests on, from the stored numbers (so the result line never says 'alive' without naming the signal)."""
+    best, kwt = pulse.get("change_24m_pct_best"), pulse.get("kw_trend_12m_pct")
+    line = f"{pulse['status']}; 24-month trend " + (f"{best}%" if best is not None else "no data")
+    if pulse.get("status_source"):
+        line += f" (status rests on one measured signal: {pulse['status_source']}, {kwt:+.1f}%)"
+    return line
 
 
 # ---------------- 04 ICE + MVP ----------------

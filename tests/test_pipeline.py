@@ -85,6 +85,11 @@ def fake_fetch(url, timeout=20):
     return {"url": url if url.startswith("http") else "https://" + url, "status": 200, "ms": 300, "bytes": len(html), "html": html, "error": ""}
 
 
+OPTIONS = [("one-time", 15, "one-time", "used car buyers", "google search", True, 1), ("sub", 29, "subscription", "used car buyers", "google search", True, 4),
+           ("b2b", 199, "subscription", "car dealers", "cold email", False, 8)]
+CASE_RULES = ["no OEM logos"]
+
+
 def fake_ai(task, cls, web_, model):
     n = cls.__name__
     comp = lambda i: {"name": f"Comp{i}", "url": f"https://comp{i}.com", "price": "$19", "pricing_model": "one-time", "source_url": f"https://comp{i}.com/pricing"}
@@ -117,10 +122,17 @@ def fake_ai(task, cls, web_, model):
                   "data_cost_per_sale_usd": 2.0, "marketing": [{"channel": "cold email", "cost": "$50/mo", "cap": "300/day", "pass_threshold": ">=3% replies", "kill_threshold": "<1%"}],
                   "guardrails": ["no OEM logos"], "access": ["DataForSEO: owner"], "owner_todo": [{"task": "buy domain", "why": "site", "minutes": 5}],
                   "owner_questions": ["Which country first?"]},
-        "Swot": {"options": [{"model": m, "price_usd": p, "conversion_pct": 2, "retention_months": r, "sales_per_month_at_1000_visits": 20,
-                              "owner_hours_per_month": 20, "sources": ["https://x"]} for m, p, r in (("one-time", 15, 1), ("sub", 29, 4), ("b2b", 199, 8))],
-                 "strengths": ["3 competitors at $19"], "weaknesses": ["DR 0 today"], "opportunities": ["UK 12k searches"], "threats": ["https://x.com new player"],
-                 "conclusions": ["a", "b", "c"]},
+        "Options": {"options": [{"model": m, "price_usd": p, "payment": pay, "payer": who, "channel": ch, "same_buyer_and_channel": same,
+                                 "conversion_pct": 2, "retention_months": r, "sales_per_month_at_1000_visits": 20, "owner_hours_per_month": 20,
+                                 "delivery_cost_per_sale_usd": 2.0, "extra_fixed_cost_usd_month": 0, "build_days": 7, "assumptions": ["conversion 2%: ASSUMPTION"],
+                                 "sources": ["https://x"]}
+                                for m, p, pay, who, ch, same, r in OPTIONS]},
+        "Case": {"strengths": ["3 competitors at $19"], "weaknesses": ["DR 0 today"], "opportunities": ["UK 12k searches"], "threats": ["https://x.com new player"],
+                 "conclusions": ["a", "b", "c"], "guardrails": CASE_RULES, "owner_todo": [{"task": "buy domain", "why": "site", "minutes": 5}],
+                 "owner_questions": ["Which country first?"],
+                 "validation_test": {"test": "pre-sale", "why": "cheapest proof", "sample": "200 visitors from the 3 easiest pages", "warmup_days": 0, "days": 14,
+                                     "budget_usd": 100, "pass_threshold": ">= 5 paid pre-orders", "kill_threshold": "0 paid pre-orders", "setup_steps": ["page", "button"]}},
+        "OnTopic": {"keep": list(range(60))},
         "Plan": {"product_line": ["sticker PDF"], "free_hook": "free preview", "upsell": "dealer plan", "why_us_5_seconds": "instant",
                  "forecast_12m_usd": {"low": 5000, "mid": 20000, "high": 60000}, "forecast_assumptions": "x",
                  "pages": [{"cluster_id": i, "url_slug": f"p{i}", "title": f"Page {i} unique angle {i * 7}", "page_type": "data",
@@ -298,6 +310,75 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(store.venture(slug)["status"], "quick_test")
         self.assertTrue((TMP / "ventures" / slug / "20_quick_test.md").exists())
 
+    def _to_gate3(self, idea):
+        slug = pipeline.new(idea, country="us")
+        for _ in range(3):
+            pipeline.run(slug, say=lambda m: None)
+            if store.venture(slug)["status"] == "gate_18":
+                break
+            pipeline.gate(slug, "go")
+        return slug
+
+    def test_one_offer_everywhere(self):
+        """The offer is chosen first; price, market, test and dates all come from it, and a different buyer is set aside, not chosen."""
+        import json
+        slug = self._to_gate3("one offer idea about build sheets")
+        d = store.venture(slug)["data"]
+        offer, folder = d["offer"], TMP / "ventures" / slug
+        self.assertEqual(offer["channel"], "google search")           # the b2b / cold-email option earns more on paper but is another business
+        self.assertIn("car dealers", d["spin_off"]["idea"])
+        mk = json.loads((folder / "14_market_analysis.json").read_text())
+        self.assertEqual(mk["chosen_price_usd"], offer["price_usd"])
+        self.assertIn("$%.2f" % offer["price_usd"], mk["bottom_up_method_at_chosen_price"])   # the formula text uses the chosen price
+        self.assertIn("at the chosen price", store.block(slug, "12")["summary"])              # so does step 12's own result line
+        fc = d["forecast_12m_usd"]                                                              # good case kept inside what Google can send
+        self.assertLessEqual(fc["high"], mk["bottom_up_at_chosen_price_usd_year"] * 0.35 + 1)
+        self.assertTrue(fc["low"] <= fc["mid"] <= fc["high"])
+        self.assertEqual(d["consistency_problems"], [])
+        self.assertIn("pre-sale", (folder / "19_business_plan.md").read_text())               # the one test is in the plan
+        pipeline.gate(slug, "test")
+        self.assertIn(offer["test"]["pass_threshold"], (folder / "20_quick_test.md").read_text())  # and the quick test is that same test
+
+    def test_not_consistent_blocks_go(self):
+        slug = self._to_gate3("inconsistent idea about option lists")
+        try:
+            CASE_RULES[:] = ["One-time payments only. No subscriptions.", "The first-year goal is $12,000", "Pre-pay 49 EUR"]
+            pipeline.rerun(slug, "16")
+            st = pipeline.run(slug, say=lambda m: None)
+        finally:
+            CASE_RULES[:] = ["no OEM logos"]
+        self.assertEqual(st, "gate_18")
+        self.assertEqual(store.block(slug, "16")["verdict"], "fail")       # the text stayed wrong after 3 tries
+        probs = " | ".join(store.venture(slug)["data"]["consistency_problems"])
+        for word in ("subscription", "sales goal", "euros"):
+            self.assertIn(word, probs)
+        for decision in ("go", "test"):
+            with self.assertRaises(SystemExit):
+                pipeline.gate(slug, decision)
+        from vm import pdf
+        self.assertIn("NOT CONSISTENT", pdf.build_html(slug))
+        self.assertIn("killed", pipeline.gate(slug, "kill"))                # stopping the idea still works
+
+    def test_rule_change_makes_steps_out_of_date(self):
+        slug = self._to_gate3("out of date idea about spec sheets")
+        self.assertEqual(pipeline.stale(slug), [])
+        old = dict(pipeline.BLOCK_VERSIONS)
+        try:
+            pipeline.BLOCK_VERSIONS["12"] = old.get("12", 1) + 1
+            self.assertEqual(pipeline.stale(slug), ["12", "15", "16", "17"])   # step 12 and everything that reads from it
+            with self.assertRaises(SystemExit):
+                pipeline.gate(slug, "go")
+            from vm import pdf
+            self.assertIn("OUT OF DATE", pdf.build_html(slug))
+            said = []
+            self.assertEqual(pipeline.run(slug, say=said.append), "gate_18")   # one run refreshes them; gates 1 and 2 are not asked again
+            self.assertIn("out of date", said[0])
+            self.assertEqual(pipeline.stale(slug), [])
+        finally:
+            pipeline.BLOCK_VERSIONS.clear()
+            pipeline.BLOCK_VERSIONS.update(old)
+
+
     def test_budget_cap_stops(self):
         os.environ["VM_MAX_USD_PER_IDEA"] = "0.05"
         try:
@@ -334,8 +415,44 @@ class Pure(unittest.TestCase):
                 return self.mk
         self.assertEqual(gates.knockouts(C(11999))[0], "KILL")                    # under the smallest size: don't build
         self.assertTrue(gates.knockouts(C(12001))[0].startswith("QUICK TEST"))   # 1x-3x: test at most
-        self.assertTrue(gates.knockouts(C(35999))[0].startswith("QUICK TEST"))
-        self.assertIsNone(gates.knockouts(C(36001))[0])
+        self.assertTrue(gates.knockouts(C(119999))[0].startswith("QUICK TEST"))  # between the smallest size and the size we want: test at most
+        self.assertIsNone(gates.knockouts(C(120001))[0])
+
+    def test_text_checks(self):
+        from vm import checks
+        offer = {"payment": "subscription", "test": {"days": 14, "warmup_days": 14}}
+        bad = checks.text_problems({"plan": "One-time payments only. Google reaches $2,209 a year, 18% of the $12,000 goal. Run a 21-day pre-sale at 49 EUR.",
+                                    "note": "CA error: `POST https://oauth2.googleapis.com/token` resulted in a 503 Service Unavailable"},
+                                   offer, market=1695, market_raw=2209)
+        text = " | ".join(bad)
+        for word in ("sales goal", "euros", "$2,209", "subscription", "21-day pre-sale", "raw error"):
+            self.assertIn(word, text)
+        good = "Sell the feed at $99 a month. About $1,695 a year is reachable through Google search. The 14-day test comes first."
+        self.assertEqual(checks.text_problems({"plan": good}, offer, market=1695, market_raw=2209), [])
+
+    def test_dates_come_from_test_and_forecast(self):
+        import datetime as dt
+        day = dt.date(2026, 11, 26)
+        offer = {"build_days": 10, "test": {"days": 14, "warmup_days": 14}}
+        tl = phase4.timeline(offer, forecast_mid=565, market_year_usd=1695, today=day)
+        by = {s["goal"]: s["by"] for s in tl["steps"]}
+        self.assertTrue(tl["test_first"])
+        self.assertEqual(tl["build_from"], "2026-12-24")                     # 14 days warm-up + 14 days test: nothing is built before
+        self.assertEqual(by["first version live"], "2027-01-03")
+        self.assertIn("not reached", by["$1,000 a month"])                   # $565 a year never gets to $1,000 a month
+        self.assertIn("not reached", by["$100 a month"])
+        big = phase4.timeline(offer, forecast_mid=60000, market_year_usd=400000, today=day)
+        self.assertFalse(big["test_first"])                                  # a market of the size we want: build right away
+        self.assertRegex({s["goal"]: s["by"] for s in big["steps"]}["$1,000 a month"], r"^2027-")
+
+    def test_rival_name_is_never_easy(self):
+        from vm import pdf
+        self.assertGreaterEqual(pdf.rank_level({"kd": 5, "intent": "brand", "top10": [{"dr": 3}], "weak_spots": ["forum"]})[0], 2)
+        self.assertLessEqual(pdf.rank_level({"kd": 5, "intent": "buy", "top10": [{"dr": 3}], "weak_spots": []})[0], 1)
+
+    def test_market_scale(self):
+        from vm.blocks import gates
+        self.assertEqual([gates.market_score(m) for m in (141, 2999, 3000, 9999, 10000, 20000, 50000)], [1, 1, 2, 2, 3, 4, 5])
 
     def test_link_targets_filter(self):
         from vm.blocks.phase3 import link_reject_reason as r

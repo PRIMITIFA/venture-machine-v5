@@ -84,9 +84,26 @@ class Settings:
         return int(_f("VM_SERP_DEPTH", 20))
 
     @property
+    def min_market_month(self):
+        """Smallest search market (USD a month) worth building for: under it the answer is KILL as a search business."""
+        if os.environ.get("VM_MIN_MARKET_USD") and not os.environ.get("VM_MIN_MARKET_USD_MONTH"):
+            return _f("VM_MIN_MARKET_USD", 12000) / 12  # older setting, given per year
+        return _f("VM_MIN_MARKET_USD_MONTH", 1000)
+
+    @property
+    def target_market_month(self):
+        """Search market (USD a month) we want: under it the most an idea can get is TEST FIRST."""
+        return max(_f("VM_TARGET_MARKET_USD_MONTH", 10000), self.min_market_month)
+
+    @property
     def min_market_usd(self):
-        """Smallest search market (USD a year) worth building for. A size bar of the machine, not anybody's sales goal."""
-        return _f("VM_MIN_MARKET_USD", 12000)
+        """The same smallest size, per year (the market numbers are stored per year)."""
+        return self.min_market_month * 12
+
+    @property
+    def good_case_share(self):
+        """The most a new site can take of the money reachable through Google search in its first year (good case)."""
+        return _f("VM_GOOD_CASE_SHARE", 0.35)
 
     @property
     def assumed_conversion(self):

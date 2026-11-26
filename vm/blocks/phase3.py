@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .. import ai, seo, web
+from .. import ai, seo, store, web
 from ..config import K, S
 from ..pipeline import Result
 from ..util import buy_volume, is_buy, md_table, median, num, read_csv, volume_split, write_csv
@@ -207,7 +207,8 @@ def b12_market(c):
             vols = seo.search_volume(heads, location_code(cc), COUNTRY_LANG.get(cc, "en"))
             by_country[cc] = int(sum(num(v.get("search_volume")) for v in vols))
         except seo.DFSError as e:
-            by_country[cc] = f"error: {e}"
+            by_country[cc] = "no data (API error)"
+            store.log(c.slug, "error", f"12 search volume {cc}: {e}")
     by_country[c.v["country"]] = int(sum(num(r["volume"]) for r in short if r["role"] == "main"))
     out = ai.ask_json(
         f"""Block 12. Market size and buyers for: {c.v['one_liner']}
@@ -233,32 +234,47 @@ def b12_market(c):
     bottom_up = clicks * conv * price * 12
     goal = S.min_market_usd  # size bar, not a sales goal
     d = {"bottom_up_usd_year": round(bottom_up),
-         "bottom_up_method": (f"{int(bv)} buying searches/mo (a rival's bare brand name counts 10%) x top-5 CTR {CTR_TOP5:.0%} x {aio_factor} "
-                              f"(Google shows its own AI answer on {aio_share:.0%} of these searches) = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) "
-                              f"x ${price:.2f} ({price_src}) x 12. This is the money reachable through Google search only, not other channels"),
-         "buying_searches_month": int(bv), "volume_split": volume_split(kws), "aio_share": round(aio_share, 2), "aio_click_factor": aio_factor,
+         "buying_searches_month": int(bv), "clicks_month": round(clicks, 1), "ctr_top5": CTR_TOP5, "conversion_used": conv, "volume_split": volume_split(kws), "aio_share": round(aio_share, 2), "aio_click_factor": aio_factor,
          "price_used_usd": price, "price_source": price_src,
          "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_traffic_history": history,
          "rivals_traffic_trend_12m_pct": rivals_trend,
          "search_volume_by_country": by_country, "min_market_usd": goal, **out.model_dump()}
     d["typical_price_usd"] = price
+    d["bottom_up_method"] = market_method(d, price, price_src)
     big, small = max(bottom_up, out.top_down_usd_year), min(bottom_up, out.top_down_usd_year)
     d["methods_differ_10x"] = bool(small and big / small > 10)
+    d["no_price_found"] = not price
     c.write("14_market_analysis.json", d)
-    summary = (f"bottom-up ${bottom_up:,.0f}/yr, top-down ${out.top_down_usd_year:,.0f}/yr (smallest worth building: ${goal:,.0f}/yr); "
-               f"underserved: {', '.join(out.underserved_countries_or_segments[:3])[:300] or 'none'}")
-    if not price:
+    return market_result(d, bottom_up)
+
+
+def market_result(d, bottom_up, at=""):
+    """Block 12's verdict and one-line result, from the stored numbers. Called again by block 16 once the price is chosen,
+    so the line always shows the same market number as the rest of the report."""
+    top_down, goal, target = num(d.get("top_down_usd_year")), S.min_market_usd, S.target_market_month * 12
+    rivals_trend, under = d.get("rivals_traffic_trend_12m_pct"), d.get("underserved_countries_or_segments") or []
+    summary = (f"search market ${bottom_up / 12:,.0f}/mo (${bottom_up:,.0f}/yr){at}, whole-industry guess {('$%s/yr' % format(round(top_down), ',')) if top_down else 'unknown (no sourced number found)'} "
+               f"(smallest worth building: ${S.min_market_month:,.0f}/mo; we want ${S.target_market_month:,.0f}+/mo); underserved: {', '.join(under[:3])[:300] or 'none'}")
+    if d.get("no_price_found"):
         return Result("warn", summary + "; no competitor price found, market size unknown: check prices by hand at gate 2")
-    if big < goal:
+    if top_down and max(bottom_up, top_down) < goal and not at:   # an unknown industry size (0) is not proof of a small one
         return Result("kill", summary + "; the whole market is too small to build for")
     if bottom_up < goal:
-        return Result("warn", summary + f"; the money reachable through Google search (${bottom_up:,.0f}) is too small to build for: "
+        return Result("warn", summary + "; the money reachable through Google search is too small to build for: "
                                         "as a search business this is a KILL at gate 3 unless another channel carries it")
     if rivals_trend is not None and rivals_trend < -30:
         summary += f"; direct rivals' Google visits fell {abs(rivals_trend):.0f}% in 12 months (shrinking)"
-    if bottom_up >= 10 * goal and out.underserved_countries_or_segments:
-        return Result("warn" if d["methods_differ_10x"] else "pass", summary + ("; methods differ >10x (flag in SWOT)" if d["methods_differ_10x"] else ""))
-    return Result("warn", summary + "; below the bar (search market 10x the smallest size AND an underserved segment)")
+    if bottom_up >= target and under:
+        return Result("warn" if d.get("methods_differ_10x") else "pass", summary + ("; the two methods differ more than 10x (flagged in the SWOT)" if d.get("methods_differ_10x") else ""))
+    return Result("warn", summary + "; below the bar (search market of the size we want AND an underserved segment): TEST FIRST at most")
+
+
+def market_method(d, price, price_src):
+    """The formula in words, built from the same numbers the result is computed from (so text and number cannot differ)."""
+    bv, clicks, conv = num(d["buying_searches_month"]), num(d["clicks_month"]), num(d["conversion_used"])
+    return (f"{int(bv)} buying searches/mo (a rival's bare brand name counts 10%) x top-5 CTR {num(d['ctr_top5']):.0%} x {d['aio_click_factor']} "
+            f"(Google shows its own AI answer on {num(d['aio_share']):.0%} of these searches) = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) "
+            f"x ${price:,.2f} ({price_src}) x 12 = ${clicks * conv * price * 12:,.0f} a year. This is the money reachable through Google search only, not other channels")
 
 
 # ---------------- 13 SEO + link gap + AI visibility ----------------
@@ -338,7 +354,10 @@ def b13_links(c):
         return Result("warn", summary + "; all DR 70+: SEO is a 12+ month game")
     if len(targets) >= 20 and drs and min(drs) < 40:  # counted after the quality filter
         return Result("pass", summary)
-    return Result("warn", summary + "; below the bar (>=20 targets AND a top competitor with DR < 40)")
+    if len(targets) < 20:
+        return Result("fail", summary + f"; only {len(targets)} good link targets (the bar is 20): links will not come from asking rivals' linkers, "
+                                        "plan another way (a data asset people cite, directories, PR)")
+    return Result("warn", summary + "; no top competitor with DR < 40")
 
 
 # ---------------- 13b AI visibility (part of block 13) ----------------
@@ -363,7 +382,8 @@ def ai_visibility(c, comps, n_prompts=None):
     product = (c.v["data"].get("product") or c.v["one_liner"] or "").strip().rstrip(".")
     payer = (c.v["data"].get("payer") or "").strip().rstrip(".")
     # the first question is the buyer's own need in plain words, so the answer is about products like ours
-    prompts = ["I am %s. I am looking for this: %s. Which specific websites or tools do you recommend?" % (payer or "a buyer", product)]
+    first = ("I need this: %s. " % product) + (("The people who need it: %s. " % payer) if payer else "") + "Which specific websites or tools do you recommend?"
+    prompts = [first]
     prompts += [f"What is the best website or tool for {h}? Recommend specific sites." for h in heads]
     direct = [x for x in comps if x.get("kind", "direct") == "direct"]
     if direct:
@@ -460,4 +480,23 @@ def people_ask(c):
             if k not in seen:
                 seen.add(k)
                 out.append({"question": q.strip(), "from_search": raw["keyword"]})
-    return out[:60]
+    return questions_on_topic(c, out[:60])
+
+
+class OnTopic(BaseModel):
+    keep: list[int] = Field(description="numbers of the questions a buyer of THIS product could plausibly ask")
+
+
+def questions_on_topic(c, qs):
+    """Google's 'people also ask' boxes drift off-topic; keep only questions about this product or its buyers' problem."""
+    if not qs:
+        return qs
+    try:
+        out = ai.ask_json(f"""Product: {c.v['one_liner']}
+Below are numbered questions from Google's "People also ask" boxes. Return the numbers of the questions that a likely buyer of this
+product could ask about this product or the problem it solves. Drop trivia, questions about who made a rival, and other topics.""",
+                          OnTopic, smart=False, context={"questions": {i: q["question"] for i, q in enumerate(qs)}})
+    except Exception:
+        return qs
+    keep = [qs[i] for i in out.keep if 0 <= i < len(qs)]
+    return keep if keep else qs

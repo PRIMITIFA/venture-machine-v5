@@ -87,10 +87,19 @@ def venture_page(slug):
         if st.startswith("gate_"):
             b = pipeline.by_id()[st.removeprefix("gate_")]
             memo = store.block(slug, b.id).get("summary", "")
+            old = pipeline.stale(slug)
+            bad = v["data"].get("consistency_problems") or [] if st == "gate_18" else []
             acts += f"<div class=card><b>{e(b.name)}</b><pre>{e(memo)}</pre><p>"
+            if old:
+                acts += (f"<b>Out of date:</b> steps {e(', '.join(old))} ran under older rules. Refresh before deciding. "
+                         f"<form class=inline method=post action='/run/{e(slug)}'><button class=primary>Refresh the report</button></form> ")
+            elif bad:
+                acts += f"<b>Not consistent:</b> {len(bad)} places in the report disagree, so GO and TEST are switched off. KILL still works. "
             for d in b.decisions:
                 if d == "angle":
                     continue  # shown in its own card above
+                if (old and d != "kill") or (bad and d in ("go", "test")):
+                    continue
                 if d == "pivot":
                     acts += (f"<form method=post action='/gate/{e(slug)}' style='margin:8px 0'><input type=hidden name=decision value=pivot>"
                              f"<input name=note placeholder='Pivot to... (e.g. UK only, B2B dealers)' required style='width:60%'> <button>PIVOT</button></form>")

@@ -1,5 +1,6 @@
 """PHASE 2: DEMAND + SEO (blocks 06-09). Real search demand, live SERPs, clusters (1 cluster = 1 page),
 and the real top-5 competitors for phase 3. All raw API data is cached 30 days; spend is capped."""
+import re
 from collections import Counter, defaultdict
 from typing import Literal
 
@@ -197,6 +198,21 @@ Return one check per keyword, same spelling.{c.note()}""", SerpChecks, smart=Fal
     return out
 
 
+def sync_kw_summary(c):
+    """Step 07's result line must show the numbers every later step uses (after the step-08 topic check), not the ones before it."""
+    st07 = store.block(c.slug, "07")
+    if not st07.get("summary") or not c.has("08_keywords_dropped.csv"):
+        return
+    kept = read_csv(c.path("08_keywords_clean.csv"))
+    sp_ = volume_split(kept)
+    new = re.sub(
+        r"\d+ clean keywords(.*?)buying volume \d+/mo \(commercial \d+, rival brand names \d+ counted at 10%, info \d+ not counted\)( \[after the step-08 topic check\])?",
+        lambda m: (f"{len(kept)} clean keywords{m.group(1)}buying volume {int(buy_volume(kept))}/mo (commercial {sp_['commercial']}, "
+                   f"rival brand names {sp_['brand']} counted at 10%, info {sp_['info']} not counted) [after the step-08 topic check]"), st07["summary"])
+    if new != st07["summary"]:
+        store.set_block(c.slug, "07", summary=new)
+
+
 def b08_serp_clusters(c):
     kws = read_csv(c.path("08_keywords_clean.csv"))
     for k in kws:
@@ -226,6 +242,7 @@ def b08_serp_clusters(c):
     kept = [dict({k_: v_ for k_, v_ in k.items() if k_ != "prio"}, intent=fixed.get(k["keyword"], k["intent"])) for k in kws if k["keyword"] not in off]
     write_csv(c.path("08_keywords_clean.csv"), kept, KW_COLS)
     write_csv(c.path("08_keywords_dropped.csv"), dropped, ["keyword", "volume", "reason"])
+    sync_kw_summary(c)
     ok = [s for s in fetched_ok if not s.get("off_topic")]
     top10_domains = {o["domain"] for s in ok for o in s["organic"] if o["rank"] and o["rank"] <= 10}
     ranks = seo.domain_ranks(top10_domains) if top10_domains else {}
@@ -370,6 +387,7 @@ They rank on Google for our searches. Classify each one; judge by what the site 
         pulse["kw_trend_12m_pct"] = kw_trend
         if pulse.get("status") == "unknown" and kw_trend is not None:
             pulse["status"] = "alive" if kw_trend >= -10 else "flat" if kw_trend >= -30 else "dying"
+            pulse["status_source"] = "our own keywords' searches over 12 months (Google Ads numbers)"
             pulse["status_source"] = "12-month search volume of our own keywords (Google Trends had no data)"
         c.write("04_niche_pulse.json", pulse)
     top20 = clusters[:20]
