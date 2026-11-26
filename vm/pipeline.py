@@ -247,6 +247,9 @@ def gate(slug, decision, note=""):
     b = by_id()[gid]
     if decision not in b.decisions:
         raise SystemExit(f"gate {gid} takes: {', '.join(b.decisions)}")
+    against = _against(slug, v, gid, decision)
+    if against:
+        note = ("OVERRIDE: " + against + (" | owner: " + note if note else "")).strip()
     store.add_gate(slug, gid, decision, note)
     store.log(slug, "gate", f"{gid} {decision.upper()} {note}")
     if decision == "pivot":
@@ -265,6 +268,22 @@ def gate(slug, decision, note=""):
         return "GO: approved for phase 5 (build). Your manual list is in OWNER-TODO.json."
     store.update_venture(slug, status="active")
     return f"{decision.upper()} saved. Run: vm run {slug}"
+
+
+def _against(slug, v, gid, decision):
+    """If the owner's GO goes against what the machine recommended, say what was overridden ('' if nothing)."""
+    if decision != "go":
+        return ""
+    d, bl = v["data"], store.blocks(slug)
+    warned = lambda ids: [b for b in ids if bl.get(b, {}).get("verdict") == "warn"]
+    if gid == "05" and d.get("first_score100") is not None and d["first_score100"] < 60:
+        return f"GO although the first-look score was WEAK ({d['first_score100']}/100)"
+    if gid == "14" and warned(("07", "08", "09", "10", "11", "12", "13")):
+        return "GO although these steps were below their bar: " + ", ".join(warned(("07", "08", "09", "10", "11", "12", "13")))
+    rec = d.get("gate3_recommendation") or ""
+    if gid == "18" and rec and not rec.startswith("FULL"):
+        return f"GO although the recommendation was {rec.split(' (')[0]}"
+    return ""
 
 
 def try_angle(slug, note=""):

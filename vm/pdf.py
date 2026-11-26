@@ -302,6 +302,8 @@ def answer_of(v, data, n_done):
         why = data.get("gate3_cap_note") or "Not clear enough to build; run a small capped test first."
         return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %d out of 100. %s" % (round(num(data.get("gate3_score")) * 20), why)
     if rec.startswith("KILL"):
+        if (data.get("gate3_cap_note") or "").startswith("Knock-out"):
+            return "DON'T BUILD IT", BAD, "It scored %d out of 100, but one rule decides on its own. %s" % (round(num(data.get("gate3_score")) * 20), data["gate3_cap_note"])
         return "DON'T BUILD IT", BAD, "It scored only %d out of 100 on the 7 checks that matter most." % round(num(data.get("gate3_score")) * 20)
     if fs is not None:
         return "NOT FINISHED YET", "#52525b", "First-look score %d out of 100. The machine has done %d of 18 steps; the main score comes when the research is done." % (fs, n_done)
@@ -353,8 +355,11 @@ def build_html(slug):
         ans, color = "GOOD NUMBERS, BUT ONE CHECK SAID NO", CARE
         said = [first_sentence(re.sub(r"\s*\|\s*OWNER OVERRIDE:.*$", "", bl.get(b_, {}).get("summary") or ""), 160) for g in overridden for b_ in g["gate"].split(",")]
         why += " Step %s said stop (%s) and you chose to continue anyway." % (", ".join(sorted({g["gate"] for g in overridden})), "; ".join(said))
-    buy = [k for k in (kws or []) if k["intent"] in ("buy", "competitor", "brand-model")]
-    buy_vol = int(sum(num(k["volume"]) for k in buy))
+    from .util import buy_volume, is_buy, volume_split
+    buy = [k for k in (kws or []) if is_buy(k)]
+    buy_vol = int(buy_volume(kws or []))
+    split = volume_split(kws or [])
+    dropped_kw = cf("08_keywords_dropped.csv") or []
     depth = data.get("depth", "full")
     quick = depth == "light"
     QMAP = QUESTIONS
@@ -364,7 +369,8 @@ def build_html(slug):
             scores, avg = light_scores(Ctx(slug)) if kws else (None, None)
             QMAP = LIGHT_QUESTIONS
         else:
-            scores, avg = gate3_scores(Ctx(slug)) if comps and mk and seo_ and clusters else (None, None)
+            main_ready = comps and mk and seo_ and clusters and bl.get("17", {}).get("status") == "VALIDATED"
+            scores, avg = gate3_scores(Ctx(slug)) if main_ready else (None, None)
     except Exception:
         scores, avg = None, None
     first = False  # True = only the first-look (phase 1) score exists so far
@@ -378,22 +384,33 @@ def build_html(slug):
     score100 = int(round(avg / 5 * 100)) if avg else None
     aiv = jf("15_ai_visibility.json")
     uec = (ue or {}).get("chosen") or {}
+    mk_up = ((mk or {}).get("bottom_up_at_chosen_price_usd_year") or (mk or {}).get("bottom_up_usd_year") or 0)
 
     worries = ["Step %s (%s) said stop, and you chose to continue. Your reason: \"%s\"" % (g["gate"], STEP_NAMES.get(g["gate"], ""), g["note"]) for g in overridden]
+    went_against = [g for g in decisions if (g.get("note") or "").startswith("OVERRIDE:")]
+    worries += ["At decision %s you chose %s" % ({"05": "1", "14": "2", "18": "3"}.get(g["gate"], g["gate"]), first_sentence(g["note"][10:].split(" | owner:")[0], 200)) for g in went_against]
+    main_done = bool(scores) and not first and not quick
     for bid in sorted(bl):
         st_ = bl[bid]
         if st_.get("verdict") not in ("warn", "kill") or bid in ("05", "14", "18"):
             continue
         summ = re.sub(r"\s*\|\s*OWNER OVERRIDE:.*$", "", st_.get("summary") or "")
-        if bid == "04" and sc:
+        if bid == "04" and sc and main_done:
+            continue  # the main score has replaced the first look; it stays in the scorecard part as history
+        elif bid == "04" and sc:
             w = "The first-look score is only %d out of 100 (60 or more is good)." % round(sc["ice_avg"] * 10)
         elif bid == "12" and mk:
-            w = "The careful market guess (%s a year) is only %.1f times your first-year goal; we want 10 times or more." % (money(mk["bottom_up_usd_year"]), mk["bottom_up_usd_year"] / max(mk["year1_goal_usd"], 1))
+            w = "The money reachable through Google search (%s a year) is only %.1f times your first-year goal; we want 10 times or more." % (money(mk_up), mk_up / max(mk["year1_goal_usd"], 1))
         elif bid == "16" and uec.get("paid_search_cac") and uec["paid_search_cac"] > uec.get("max_cac", 0):
             w = "Paid ads would lose money: one customer from Google ads costs about %s, but you keep only %s per sale. Use free channels (Google search results, email)." % (money(uec["paid_search_cac"]), money(uec["net_per_sale"]))
         else:
             w = "%s %s" % (STEP_NAMES.get(bid, bid) + ":", first_sentence(summ))
         worries.append(w)
+    if data.get("gate3_cap_note") and main_done:
+        worries.insert(0, data["gate3_cap_note"])
+    if dropped_kw:
+        worries.append("%d searches were thrown out because Google shows something else for them (for example \"%s\": %s)."
+                       % (len(dropped_kw), dropped_kw[0]["keyword"], first_sentence(dropped_kw[0]["reason"], 120)))
     if sc and sc.get("risks"):
         worries += [first_sentence(r) for r in sc["risks"][:3]]
 
@@ -444,8 +461,11 @@ def build_html(slug):
         return ("good", GOOD) if ok else ("careful", CARE) if care else ("problem", BAD)
     if buy:
         top_cpc = max(num(k["cpc"]) for k in buy)
-        glance.append(("Demand", "{:,} searches a month from people ready to buy".format(buy_vol), *verdict(buy_vol >= 1000, buy_vol >= 300)))
-        glance.append(("Buyer value", "advertisers pay up to %s per click" % money(top_cpc), *verdict(top_cpc >= 2, top_cpc >= 1)))
+        glance.append(("Demand", "{:,} buying searches a month ({:,} commercial + 10% of {:,} for a rival's name)".format(buy_vol, split["commercial"], split["brand"])
+                       if split["brand"] else "{:,} searches a month from people ready to buy".format(buy_vol), *verdict(buy_vol >= 1000, buy_vol >= 300)))
+        from .util import weighted_cpc
+        wc_ = weighted_cpc(kws or [])
+        glance.append(("Buyer value", "advertisers pay about %s per click on average across the buying searches (highest single one %s)" % (money(wc_), money(top_cpc)), *verdict(wc_ >= 2, wc_ >= 1)))
     if how and not biz:
         priced = [x_ for x_ in how.get("competitors", []) if x_.get("price") and "unknown" not in x_["price"].lower()]
         free_ = sum(1 for x_ in priced if "free" in x_["price"].lower())
@@ -453,7 +473,12 @@ def build_html(slug):
                        *verdict(len(priced) >= 3 and free_ < len(priced) / 2, len(priced) >= 1)))
     if pulse:
         ch = pulse.get("change_24m_pct_best")
-        if pulse["status"] == "dying":
+        kwt = pulse.get("kw_trend_12m_pct")
+        if pulse["status"] == "unknown" or (ch is None and kwt is None):
+            txt = "not enough data to tell if interest is growing or shrinking"
+        elif ch is None and kwt is not None:
+            txt = "our own keywords' searches are %s %d%% in 12 months (Google Trends had no data)" % ("up" if kwt >= 0 else "down", abs(kwt))
+        elif pulse["status"] == "dying":
             txt = "interest is shrinking"
         elif ch is not None and ch < -10:
             txt = "searches are down %d%% in 2 years, but people still buy (ads, new sites, questions)" % abs(ch)
@@ -464,7 +489,10 @@ def build_html(slug):
         rt = (mk or {}).get("rivals_traffic_trend_12m_pct")
         if rt is not None:
             txt += "; the top rivals' Google visits are %s %d%% over 12 months" % ("up" if rt >= 0 else "down", abs(rt))
-        good_trend = pulse["status"] == "alive" and ((ch is None or ch >= -10) or (rt is not None and rt > 5))
+        known = ch is not None or kwt is not None
+        up = (ch is not None and ch >= -10) or (ch is None and kwt is not None and kwt >= -10)
+        shrinking_rivals = rt is not None and rt < -30
+        good_trend = pulse["status"] == "alive" and known and up and not shrinking_rivals
         glance.append(("Trend", txt, *verdict(good_trend, pulse["status"] != "dying")))
     if clusters:
         lv = [rank_level(cl)[0] for cl in clusters[:15]]
@@ -478,16 +506,16 @@ def build_html(slug):
                        % (g_.get("with_ai_answer", 0), g_.get("searches", 0), ", ".join(r["site"] for r in rec_[:2]) or "nobody"),
                        *verdict(g_.get("with_ai_answer", 0) <= g_.get("searches", 0) / 2, True)))
     if seo_:
-        drs = [num(s_["dr"]) for s_ in seo_["competitors"] if s_.get("dr")]
+        drs = [num(s_["dr"]) for s_ in seo_["competitors"] if s_.get("dr") and s_.get("kind", "direct") == "direct"]
         if drs:
             rtr = (mk or {}).get("rival_traffic") or {}
             top_r = max(rtr.items(), key=lambda kv: num(kv[1].get("visits")), default=(None, {}))
             extra = ("; biggest gets ~%s Google visits a month" % "{:,}".format(int(num(top_r[1].get("visits"))))) if top_r[0] else ""
-            glance.append(("Rivals", "the weakest of the top 5 has strength %d/100%s%s" % (min(drs), extra, ("; gap: " + first_sentence(biz["identified_gap"], 100)) if biz else ""),
+            glance.append(("Rivals", "the weakest direct rival has strength %d/100%s%s" % (min(drs), extra, ("; gap: " + first_sentence(biz["identified_gap"], 100)) if biz else ""),
                            *verdict(min(drs) < 40, min(drs) < 60)))
     if mk:
-        x_ = mk["bottom_up_usd_year"] / max(mk["year1_goal_usd"], 1)
-        glance.append(("Market size", "careful guess %s a year, %.1fx your first-year goal" % (money(mk["bottom_up_usd_year"]), x_), *verdict(x_ >= 10, x_ >= 3)))
+        x_ = mk_up / max(mk["year1_goal_usd"], 1)
+        glance.append(("Market size", "about %s a year reachable through Google search, %.1fx your first-year goal" % (money(mk_up), x_), *verdict(x_ >= 10, x_ >= 3)))
     if uec:
         ads_ok = uec.get("paid_search_cac") is not None and uec["paid_search_cac"] <= uec.get("max_cac", 0)
         glance.append(("Money", "you keep %s per sale; Google ads %s" % (money(uec["net_per_sale"]), "can pay off" if ads_ok else "would lose money"),
@@ -505,6 +533,7 @@ def build_html(slug):
         glance.append(("Effort", "%s days to a first version%s" % (sc["effort"]["days_to_mvp"], ("; about %s a month to run" % money(fixed)) if fixed is not None else ""),
                        *verdict(sc["effort"]["days_to_mvp"] <= 14, sc["effort"]["days_to_mvp"] <= 30)))
 
+    fc_mid = (data.get("forecast_12m_usd") or {}).get("mid")
     # ================= THE SIMPLE REPORT (page 1-2) =================
     level = {"light": "QUICK CHECK", "full": "FULL CHECK", "deep": "DEEP CHECK"}.get(depth, "FULL CHECK")
     H.append("<div class=mute style='font-size:8.5pt;letter-spacing:.08em'>THE VENTURE MACHINE &middot; %s REPORT &middot; %s</div>" % (level, e(store.now()[:10])))
@@ -540,12 +569,20 @@ def build_html(slug):
                "This is an early judgement from what the AI found on the web, before any Google numbers. The main score (7 checks) replaces it after the full research.</p>" if first else
                "<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
                "A quick check does not look at rivals, AI assistants, market size or money yet.</p>" if quick else
-               "<p class='small mute'>Overall score = the average of the 7, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build, unless the likely first-year sales are below your goal (then: test first).</p>"))
+               "<p class='small mute'>Overall score = the 7 combined so that one very low score pulls the whole result down, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build. "
+               "Two rules decide on their own: if the money reachable through Google search is below your first-year goal the answer is don't build, and if the likely first-year sales are below your goal the most it can get is test first.</p>"))
     if glance:
         H.append("<h3>Everything at a glance</h3><table class=glance>" + "".join(
             "<tr><td class=t>%s</td><td>%s</td><td class=n>%s</td></tr>" % (e(t), e(f), pill(w, c)) for t, f, w, c in glance) + "</table>")
-    if sc:
-        H.append("<h3>In three sentences</h3>" + bullets(sc["summary_3_lines"]))
+    if main_done:
+        best_k, worst_k = max(scores, key=lambda k_: scores[k_][0]), min(scores, key=lambda k_: scores[k_][0])
+        three = ["Main score %d out of 100. %s" % (score100, why),
+                 "Strongest point: %s %s. Weakest point: %s %s." % (QMAP.get(best_k, best_k), first_sentence(scores[best_k][1], 140).rstrip("."), QMAP.get(worst_k, worst_k), first_sentence(scores[worst_k][1], 140).rstrip("."))]
+        if fc_mid is not None:
+            three.append("Likely first-year sales: %s, against a goal of %s." % (money(fc_mid), money(S.year1_goal_usd)))
+        H.append("<h3>In three sentences</h3>" + bullets(three))
+    elif sc:
+        H.append("<h3>In three sentences%s</h3>" % (" (from the first look)" if kws else "") + bullets(sc["summary_3_lines"]))
     H.append("<div class=two><div><h3>Top worries</h3>%s</div><div><h3>What to do next</h3><ol class=steps>%s</ol></div></div>"
              % ("<div class=worry>%s</div>" % bullets(worries[:4]) if worries else "<p>Nothing serious was flagged.</p>",
                 "".join("<li>%s</li>" % e(x) for x in nxt[:4])))
@@ -585,11 +622,17 @@ def build_html(slug):
         if short:
             top = max(short, key=lambda r: num(r["volume"]))
             easy = sum(1 for r in short if r["kd"] != "" and num(r["kd"]) <= 20)
+            if split["brand"] or dropped_kw:
+                H.append("<p class=small><b>How the buying searches are counted:</b> %s commercial searches count in full; %s searches for a rival's name alone count 10%% "
+                         "(those people want that rival's site); %s learning searches are not counted.%s</p>"
+                         % ("{:,}".format(split["commercial"]), "{:,}".format(split["brand"]), "{:,}".format(split["info"]),
+                            (" <b>%d searches were thrown out</b> because Google shows something else for them: %s."
+                             % (len(dropped_kw), "; ".join("\"%s\" (%s a month): %s" % (e(x_["keyword"]), e(x_["volume"]), e(first_sentence(x_["reason"], 110))) for x_ in dropped_kw[:4]))) if dropped_kw else ""))
             H.append(plain("About <b>{:,}</b> searches a month come from people who look ready to buy. The biggest single search is "
                            "<b>\"{}\"</b> ({:,} a month). <b>{} of the {}</b> best searches are easy for a brand-new site to rank for."
                            .format(buy_vol, e(top["keyword"]), int(num(top["volume"])), easy, len(short))))
             rows = [{"kw": r["keyword"], "vol": "{:,}".format(int(num(r["volume"]))), "cpc": money(r["cpc"]), "kd": kd_word(r["kd"]),
-                     "who": {"buy": "ready to buy", "competitor": "looking at a rival", "brand-model": "wants a specific thing", "info": "just learning"}.get(r["intent"], r["intent"])}
+                     "who": {"buy": "ready to buy", "competitor": "comparing rivals", "brand": "wants a rival's own site", "brand-model": "wants a specific thing", "info": "just learning"}.get(r["intent"], r["intent"])}
                     for r in sorted(short, key=lambda r: -num(r["score"]))[:15]]
             H.append("<h3>The best searches to go after</h3>" + table(rows, ["kw", "vol", "cpc", "kd", "who"],
                                                                       ["What people type into Google", "Searches a month", "Ad click price", "How hard to rank", "Who is searching"],
@@ -597,7 +640,8 @@ def build_html(slug):
         if pulse:
             word = {"alive": ("alive", GOOD, "People still search for this and new sites keep appearing."),
                     "flat": ("flat", CARE, "Interest is not growing, but it is not dying either."),
-                    "dying": ("dying", BAD, "Fewer people search for this every year.")}[pulse["status"]]
+                    "dying": ("dying", BAD, "Fewer people search for this every year."),
+                    "unknown": ("unknown", CARE, "There was not enough data to tell: no trend history, no advertisers and no fresh discussions. That is not proof of demand.")}[pulse["status"]]
             H.append("<h3>Is it growing? %s</h3><p>%s</p>" % (pill(word[0], word[1]), e(word[2])))
             tr = [{"t": t, "c": ("%+.0f%%" % x["change_24m_pct"]) if x["change_24m_pct"] is not None else "not enough data"} for t, x in pulse.get("trend", {}).items()]
             H.append(table(tr, ["t", "c"], ["Search term", "Change over the last 2 years (Google Trends)"], right=("c",)))
@@ -748,12 +792,13 @@ def build_html(slug):
     if mk:
         section("How big is the money?", "Two different ways to guess how much money is in this market.")
         goal = mk["year1_goal_usd"]
-        x = mk["bottom_up_usd_year"] / max(goal, 1)
-        H.append(plain("<b>Careful guess: %s a year.</b> That is roughly what the top sites can earn from these Google searches if about 1 in 100 visitors buys. "
+        x = mk_up / max(goal, 1)
+        H.append(plain("<b>Reachable through Google search: %s a year.</b> That is roughly what the top sites can earn from these searches if about 1 in 100 visitors buys%s. "
+                       "It covers Google search only; other channels (cold email, communities) are not in it. "
                        "<b>Big-picture guess: %s a year</b> for the whole industry; you will only ever get a small slice of that. "
-                       "Your first-year goal is %s, and the careful guess is <b>%.1f times</b> that (we want at least 10 times)."
-                       % (money(mk["bottom_up_usd_year"]), money(mk["top_down_usd_year"]), money(goal), x)))
-        H.append("<div class=two><div class=card><h4>How the careful guess works</h4><p class=small>%s</p></div><div class=card><h4>How the big-picture guess works</h4><p class=small>%s</p></div></div>"
+                       "Your first-year goal is %s, and the search number is <b>%.1f times</b> that (we want at least 10 times; under 1 time means don't build it as a search business)."
+                       % (money(mk_up), (" at the chosen price of %s" % money(mk["chosen_price_usd"])) if mk.get("chosen_price_usd") else "", money(mk["top_down_usd_year"]), money(goal), x)))
+        H.append("<div class=two><div class=card><h4>How the search number works</h4><p class=small>%s</p></div><div class=card><h4>How the big-picture guess works</h4><p class=small>%s</p></div></div>"
                  % (e(mk["bottom_up_method"]), e(first_sentence(mk["top_down_method"], 400))))
         rows = [{"c": k.upper(), "s": ("{:,}".format(val) if isinstance(val, int) else val)} for k, val in mk.get("search_volume_by_country", {}).items()]
         H.append("<h3>Where people search for it</h3>" + table(sorted(rows, key=lambda r: -num(str(r["s"]).replace(",", ""))), ["c", "s"], ["Country", "Searches a month (main words)"], right=("s",)))

@@ -39,6 +39,7 @@ def b01_intake(c):
             return Result("kill", f"duplicate of '{o['slug']}' ({o['status']}), text match {r:.0%}")
     out = ai.ask_json(
         f"""Block 01. Turn this raw idea into one sentence: "People [who] want X and would pay for Y".
+Name ONE main paying group (the one most likely to pay first); if the raw idea lists several, pick one and say so in why_unclear.
 Then check if it duplicates an idea in the archive (same buyer AND same product = duplicate; killed ideas count too).
 Raw idea: {v['idea']}
 Source: {v['source'] or '-'}
@@ -200,6 +201,8 @@ Competitors already known: {[x['url'] for x in how['competitors']]}{c.note()}"""
     quiet = len(out.fresh_discussions_90d) == 0
     if best is not None and best < -30 and not out.rising_synonyms and not ads and quiet:
         status = "dying"
+    elif best is None and not ads and quiet:
+        status = "unknown"  # no trend data, no ads, no fresh talk: we do not know, and that is not "alive"
     elif best is None or best >= -10 or out.rising_synonyms:
         status = "alive"
     else:
@@ -211,6 +214,8 @@ Competitors already known: {[x['url'] for x in how['competitors']]}{c.note()}"""
                f"{len(out.fresh_discussions_90d)} fresh discussions; {len(out.new_competitors_12m)} new players")
     if status == "dying":
         return Result("kill", summary)
+    if status == "unknown":
+        return Result("warn", summary + "; no trend data, no ads and no fresh discussions: demand is UNKNOWN, not proven")
     return Result("pass" if status == "alive" else "warn", summary)
 
 

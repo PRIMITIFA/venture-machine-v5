@@ -57,3 +57,17 @@ These are written into every `GUARDRAILS.md`:
 - No money moves without the owner.
 - Caps everywhere.
 - Thresholds are written before the test.
+
+## Rules that keep the numbers honest
+
+These apply across the blocks and come from an audit of a full run (2026-11-26).
+
+- **Off-topic searches are thrown out (08).** After the real page-1 results are fetched, the AI reads the titles and the "People also ask" questions for every search. If Google shows something else for it (another meaning, a school programme, sellers instead of buyers), the search is removed and listed in `08_keywords_dropped.csv` with the reason. Intent labels are corrected from the same results.
+- **A rival's bare brand name counts 10% (07, 12, 18).** Someone typing only a rival's name wants that rival's site. "X alternative", "X vs Y", "X review" and "X pricing" count in full. Learning searches count zero. Every report shows the split: commercial / brand / info.
+- **Real rivals only (09).** Sites on page 1 are classified as direct, generalist or off-target. Off-target sites are removed (`11_competitors_removed.json`). The paying rivals found in block 02 are added even when they do not rank. Generalists never set the "weakest rival" number and their links are not used for link targets.
+- **No data is UNKNOWN (03, report).** No trend data, no ads and no fresh discussions gives the status `unknown` and a warning, not "alive". After block 09 the 12-month trend of the real keywords fills the gap. The main score is shown only when step 17 is done; before that the report says "not yet".
+- **Scoring (18).** The 7 checks are combined with a geometric mean, so one very low score pulls the result down. Click price is averaged by search volume and capped when no advertiser was seen. "Easy to rank" is capped when there are few buying searches.
+- **Knock-outs (18).** Money reachable through Google search under 1x the first-year goal is a KILL as a search business, whatever the average says. Under 3x it is capped at TEST. The market is restated at the price block 16 chose, so market, economics and plan use one price.
+- **Link targets are filtered (13).** Strength 15 or more, at least 100 Google visits a month, and no casino, betting or spam-style names. Only the filtered list counts toward the 20 needed. Rejected sites go to `15_link_targets_rejected.csv`.
+- **Overrides are written down (05, 14, 18).** A GO against the recommendation (weak first look, steps below their bar, or a KILL/TEST recommendation) is stored as `OVERRIDE: ...` and shown in every later report.
+- **Plan rules (17).** One main search belongs to one page; extra pages on the same search become support pages with no target keyword. If search alone cannot reach the goal, the plan must start with a cheap validation test.

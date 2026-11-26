@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from .. import ai, seo, web
 from ..config import K, S
 from ..pipeline import Result
-from ..util import md_table, median, num, read_csv, write_csv
+from ..util import buy_volume, is_buy, md_table, median, num, read_csv, volume_split, write_csv
 
 
 # ---------------- 10 Top-5 UX audit ----------------
@@ -141,6 +141,7 @@ Our data sources and their cost are in 'how'. Say if competitors sell cheaper th
 
 # ---------------- 12 Market size + buyers ----------------
 CTR_TOP5 = 0.28 + 0.15 + 0.10 + 0.07 + 0.05  # typical organic CTR of positions 1-5
+AIO_CLICK_FACTOR = 0.6  # a search with a Google AI answer sends roughly 60% of the usual clicks (rule of thumb)
 
 
 def parse_prices(text):
@@ -182,7 +183,7 @@ def b12_market(c):
         except seo.DFSError as ex:
             rival_traffic[x["domain"]] = {"error": str(ex)[:150]}
     history, trends = {}, []
-    by_visits = sorted(comps, key=lambda x: -num((rival_traffic.get(x["domain"]) or {}).get("visits")))
+    by_visits = sorted([x for x in comps if x.get("kind", "direct") == "direct"], key=lambda x: -num((rival_traffic.get(x["domain"]) or {}).get("visits")))
     for x in by_visits[:K("history_rivals")]:
         try:
             h = seo.traffic_history(x["domain"], c.loc, c.lang)
@@ -195,7 +196,7 @@ def b12_market(c):
             if first:
                 trends.append(round((last - first) / first * 100, 1))
                 rival_traffic[x["domain"]]["trend_12m_pct"] = trends[-1]
-    rivals_trend = round(sum(trends) / len(trends), 1) if trends else None
+    rivals_trend = round(sum(trends) / len(trends), 1) if trends else None  # direct rivals only (see by_visits)
     heads = [r["keyword"] for r in short if r["role"] == "main"][:5]
     by_country = {}
     for cc in list(dict.fromkeys(S.market_countries + K("extra_countries"))):
@@ -219,7 +220,11 @@ def b12_market(c):
     conv = S.assumed_conversion
     # niche clicks: what the top-5 results get from OUR buying keywords (volume x organic CTR of positions 1-5)
     kws = read_csv(c.path("08_keywords_clean.csv"))
-    clicks = sum(num(k["volume"]) * CTR_TOP5 for k in kws if k["intent"] in ("buy", "competitor", "brand-model"))
+    serps_ = [s for s in c.read("09_serp_raw.json", default=[]) if not s.get("error") and not s.get("off_topic")]
+    aio_share = sum(1 for s in serps_ if (s.get("features") or {}).get("ai_overview")) / max(len(serps_), 1)
+    aio_factor = round(1 - (1 - AIO_CLICK_FACTOR) * aio_share, 2)  # searches with a Google AI answer send fewer clicks
+    bv = buy_volume(kws)
+    clicks = bv * CTR_TOP5 * aio_factor
     price, price_src = out.typical_price_usd, "AI from block 11 pricing"
     if not price:
         seen = [p for x in biz["competitors"] for pl in x["plans"] for p in parse_prices(pl["price"])]
@@ -228,7 +233,11 @@ def b12_market(c):
     bottom_up = clicks * conv * price * 12
     goal = S.year1_goal_usd
     d = {"bottom_up_usd_year": round(bottom_up),
-         "bottom_up_method": f"buying searches/mo x top-5 CTR {CTR_TOP5:.0%} = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) x ${price:.2f} ({price_src}) x 12",
+         "bottom_up_method": (f"{int(bv)} buying searches/mo (a rival's bare brand name counts 10%) x top-5 CTR {CTR_TOP5:.0%} x {aio_factor} "
+                              f"(Google shows its own AI answer on {aio_share:.0%} of these searches) = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) "
+                              f"x ${price:.2f} ({price_src}) x 12. This is the money reachable through Google search only, not other channels"),
+         "buying_searches_month": int(bv), "volume_split": volume_split(kws), "aio_share": round(aio_share, 2), "aio_click_factor": aio_factor,
+         "price_used_usd": price, "price_source": price_src,
          "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_traffic_history": history,
          "rivals_traffic_trend_12m_pct": rivals_trend,
          "search_volume_by_country": by_country, "year1_goal_usd": goal, **out.model_dump()}
@@ -242,22 +251,45 @@ def b12_market(c):
         return Result("warn", summary + "; no competitor price found, market size unknown: check prices by hand at gate 2")
     if big < goal:
         return Result("kill", summary + "; the whole market is smaller than the year-1 goal")
+    if bottom_up < goal:
+        return Result("warn", summary + f"; the money reachable through Google search (${bottom_up:,.0f}) is below the year-1 goal: "
+                                        "as a search business this is a KILL at gate 3 unless another channel carries it")
+    if rivals_trend is not None and rivals_trend < -30:
+        summary += f"; direct rivals' Google visits fell {abs(rivals_trend):.0f}% in 12 months (shrinking)"
     if bottom_up >= 10 * goal and out.underserved_countries_or_segments:
         return Result("warn" if d["methods_differ_10x"] else "pass", summary + ("; methods differ >10x (flag in SWOT)" if d["methods_differ_10x"] else ""))
     return Result("warn", summary + "; below the bar (bottom-up >= 10x goal AND an underserved segment)")
 
 
 # ---------------- 13 SEO + link gap + AI visibility ----------------
+MIN_LINK_DR, MIN_LINK_VISITS = 15, 100
+SPAM_WORDS = ("casino", "poker", "gambl", "betting", "slot", "porn", "adult", "escort", "viagra", "pharma", "crypto", "bitcoin", "loan", "payday", "thc", "cbd", "mirror")
+SPAM_TOKENS = {"bet", "bets", "sex", "xxx", "vape"}
+
+
+def link_reject_reason(t):
+    """Why a site is not worth asking for a link ('' = keep it)."""
+    d = t["domain"].lower()
+    name = d.rsplit(".", 1)[0]
+    if any(w in name for w in SPAM_WORDS) or SPAM_TOKENS & set(re.split(r"[^a-z]+", name)) or re.match(r"bet(?!ter|a|h|ty|ween)[a-z]{3,}", name):
+        return "spam or gambling style name"
+    if num(t["dr"]) < MIN_LINK_DR:
+        return f"strength under {MIN_LINK_DR} (or no data)"
+    return ""
+
+
 def b13_links(c):
     comps = c.read("11_top_competitors.json")
     seo_rows, refs = [], {}
     for x in comps:
         d = x["domain"]
         s = seo.backlinks_summary(d)
+        s["kind"] = x.get("kind", "direct")
         s["top_pages"] = seo.top_pages(d, c.loc, c.lang, limit=10)
         s["free_tool_pages"] = [p["url"] for p in s["top_pages"] if any(w in (p["url"] or "").lower() for w in ("tool", "calculator", "checker", "free", "generator", "lookup"))]
         seo_rows.append(s)
-        refs[d] = seo.referring_domains(d, limit=K("ref_limit"))
+        if s["kind"] == "direct":  # a general giant's links say nothing about who links to sites like ours
+            refs[d] = seo.referring_domains(d, limit=K("ref_limit"))
     links = defaultdict(lambda: {"dr": 0, "competitors": []})
     comp_set = {x["domain"] for x in comps}
     for d, lst in refs.items():
@@ -267,25 +299,44 @@ def b13_links(c):
                 continue
             links[rd]["dr"] = max(links[rd]["dr"], num(r["dr"]))
             links[rd]["competitors"].append(d)
-    targets = [{"domain": k, "dr": int(v["dr"]), "links_to_n": len(v["competitors"]), "competitors": v["competitors"]}
-               for k, v in links.items() if len(v["competitors"]) >= 2]
-    targets.sort(key=lambda t: (-t["links_to_n"], -t["dr"]))
-    write_csv(c.path("15_link_targets.csv"), targets, ["domain", "dr", "links_to_n", "competitors"])
+    found = [{"domain": k, "dr": int(v["dr"]), "links_to_n": len(v["competitors"]), "competitors": v["competitors"]}
+             for k, v in links.items() if len(v["competitors"]) >= 2]
+    found.sort(key=lambda t: (-t["links_to_n"], -t["dr"]))
+    targets, rejected = [], []
+    for t in found:
+        why = link_reject_reason(t)
+        (rejected.append(dict(t, why=why)) if why else targets.append(t))
+    if targets:  # a site worth asking must also get real Google visitors
+        try:
+            tv = seo.traffic([t["domain"] for t in targets[:200]], c.loc, c.lang)
+        except seo.DFSError:
+            tv = {}
+        keep = []
+        for t in targets:
+            visits = (tv.get(t["domain"]) or {}).get("etv")
+            t["visits"] = int(visits) if visits is not None else ""
+            if t["domain"] in tv and num(visits) < MIN_LINK_VISITS:
+                rejected.append(dict(t, why=f"under {MIN_LINK_VISITS} Google visits a month"))
+            else:
+                keep.append(t)
+        targets = keep
+    write_csv(c.path("15_link_targets.csv"), targets, ["domain", "dr", "visits", "links_to_n", "competitors"])
+    write_csv(c.path("15_link_targets_rejected.csv"), rejected, ["domain", "dr", "links_to_n", "why"])
     c.write("15_competitor_seo.json", {"competitors": seo_rows})
-    gap = keyword_gap(c, comps)
+    gap = keyword_gap(c, [x for x in comps if x.get("kind", "direct") == "direct"])
     write_csv(c.path("15_keyword_gap.csv"), gap, ["keyword", "volume", "cpc", "kd", "best_rival", "rival_rank"])
     questions = people_ask(c)
     c.write("15_questions.json", questions)
     ai_vis = ai_visibility(c, comps)
     c.write("15_ai_visibility.json", ai_vis)
-    drs = [num(s["dr"]) for s in seo_rows if s["dr"] is not None]
+    drs = [num(s["dr"]) for s in seo_rows if s["dr"] is not None and s["kind"] == "direct"]
     dr_txt = ", ".join("%s %s" % (s["domain"], s["dr"]) for s in seo_rows)
-    summary = (f"{len(targets)} link targets (link to >=2 competitors); competitor DR {dr_txt}; "
+    summary = (f"{len(targets)} good link targets (link to >=2 rivals, strength 15+, real visitors, not spam; {len(rejected)} rejected); competitor DR {dr_txt}; "
                f"median referring domains {int(median([num(s['referring_domains']) for s in seo_rows]))}")
     summary += "; %d searches rivals get that we had not planned; %d questions people ask; AI: %s" % (len(gap), len(questions), ai_vis["headline"])
     if drs and min(drs) >= 70:
         return Result("warn", summary + "; all DR 70+: SEO is a 12+ month game")
-    if len(targets) >= 20 and drs and min(drs) < 40:
+    if len(targets) >= 20 and drs and min(drs) < 40:  # counted after the quality filter
         return Result("pass", summary)
     return Result("warn", summary + "; below the bar (>=20 targets AND a top competitor with DR < 40)")
 
@@ -308,10 +359,15 @@ def ai_visibility(c, comps, n_prompts=None):
     """Do ChatGPT, Perplexity and Google's AI Overviews recommend the rivals, and which sites do they quote?"""
     n_prompts = n_prompts or K("ai_prompts")
     clusters = c.read("10_clusters_serp.json")
-    heads = [cl["head"] for cl in clusters if cl["intent"] in ("buy", "brand-model")][:n_prompts] or [cl["head"] for cl in clusters[:n_prompts]]
-    prompts = [f"What is the best website or tool for {h}? Recommend specific sites." for h in heads]
-    if comps:
-        prompts.append(f"What are the best alternatives to {comps[0]['domain']}?")
+    heads = [cl["head"] for cl in clusters if cl["intent"] in ("buy", "brand-model")][:max(n_prompts - 1, 1)]
+    product = (c.v["data"].get("product") or c.v["one_liner"] or "").strip().rstrip(".")
+    payer = (c.v["data"].get("payer") or "").strip().rstrip(".")
+    # the first question is the buyer's own need in plain words, so the answer is about products like ours
+    prompts = ["I am %s. I am looking for this: %s. Which specific websites or tools do you recommend?" % (payer or "a buyer", product)]
+    prompts += [f"What is the best website or tool for {h}? Recommend specific sites." for h in heads]
+    direct = [x for x in comps if x.get("kind", "direct") == "direct"]
+    if direct:
+        prompts.append(f"What are the best alternatives to {direct[0]['domain']}?")
     iso = ISO.get(c.v["country"], c.v["country"].upper()) if not str(c.v["country"]).isdigit() else "US"
     answers = []
     for p in prompts:
@@ -333,7 +389,7 @@ def ai_visibility(c, comps, n_prompts=None):
     # Google AI Overviews: re-read our SERPs (from cache, free) for the sites they cite
     aio_total, aio_count, aio_sources = 0, 0, defaultdict(int)
     for raw in c.read("09_serp_raw.json"):
-        if raw.get("error"):
+        if raw.get("error") or raw.get("off_topic"):
             continue
         sr = seo.serp(raw["keyword"], c.loc, c.lang)
         aio_total += 1
@@ -397,7 +453,7 @@ def people_ask(c):
     """'People also ask' questions from our Google results (re-read from cache: free)."""
     seen, out = set(), []
     for raw in c.read("09_serp_raw.json"):
-        if raw.get("error"):
+        if raw.get("error") or raw.get("off_topic"):
             continue
         for q in seo.serp(raw["keyword"], c.loc, c.lang).get("questions") or []:
             k = q.strip().lower()

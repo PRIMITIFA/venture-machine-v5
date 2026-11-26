@@ -134,7 +134,18 @@ def fake_ai(task, cls, web_, model):
         m = re.search(r'"keywords": (\[.*?\])', task, re.S)
         kws = json.loads(m.group(1)) if m else []
         return {"labels": [{"keyword": k, "intent": "buy" if i % 3 else "competitor", "junk": False} for i, k in enumerate(kws)]}
+    if n == "SerpChecks":
+        import json, re
+        kws = re.findall(r'"keyword": "([^"]+)"', task)
+        return {"checks": [{"keyword": k, "on_topic": k not in OFF_TOPIC, "intent": "brand" if k in BRAND_ONLY else "buy", "reason": "means something else on Google"} for k in kws]}
+    if n == "RivalKinds":
+        import re
+        doms = re.findall(r'"domain": "([^"]+)"', task)
+        return {"rivals": [{"domain": d, "kind": RIVAL_KIND.get(d, "direct"), "reason": "test"} for d in doms]}
     return data[n]
+
+
+OFF_TOPIC, BRAND_ONLY, RIVAL_KIND = set(), set(), {}
 
 
 class Pipeline(unittest.TestCase):
@@ -226,6 +237,47 @@ class Pipeline(unittest.TestCase):
         self.assertIn("GOOD FIRST LOOK", h2)
         self.assertIn("already saved", pipeline.gate(slug, "angle"))  # asking twice does not make a second copy
 
+    def test_off_topic_searches_and_rival_brand_names(self):
+        from vm.util import read_csv, buy_volume
+        slug = pipeline.new("relevance filter idea about build sheets", country="us")
+        pipeline.run(slug, say=lambda m: None)
+        pipeline.gate(slug, "go")
+        OFF_TOPIC.update({KWS[0]}); BRAND_ONLY.update({KWS[1]}); RIVAL_KIND["comp5.com"] = "off-target"
+        try:
+            self.assertEqual(pipeline.run(slug, say=lambda m: None), "gate_14")
+        finally:
+            OFF_TOPIC.clear(); BRAND_ONLY.clear(); RIVAL_KIND.clear()
+        d = TMP / "ventures" / slug
+        clean = read_csv(d / "08_keywords_clean.csv")
+        dropped = read_csv(d / "08_keywords_dropped.csv")
+        self.assertIn(KWS[0], [r["keyword"] for r in dropped])          # Google shows something else: thrown out
+        self.assertNotIn(KWS[0], [r["keyword"] for r in clean])
+        brand = [r for r in clean if r["keyword"] == KWS[1]][0]
+        self.assertEqual(brand["intent"], "brand")                         # a rival's bare name: counted at 10%
+        full = sum(float(r["volume"]) for r in clean if r["intent"] in ("buy", "competitor", "brand-model"))
+        self.assertAlmostEqual(buy_volume(clean), full + 0.1 * float(brand["volume"]), places=3)
+        import json
+        comps = json.loads((d / "11_top_competitors.json").read_text())
+        self.assertNotIn("comp5.com", [x["domain"] for x in comps])      # off-target site is not a rival
+        self.assertIn("comp5.com", [x["domain"] for x in json.loads((d / "11_competitors_removed.json").read_text())["off_target"]])
+        self.assertNotIn(KWS[0], [cl["head"] for cl in json.loads((d / "10_clusters_serp.json").read_text())])
+
+    def test_go_against_the_recommendation_is_an_override(self):
+        weak = lambda task, cls, web_, model: (fake_ai(task, cls, web_, model) | {"ice": {"impact": 3, "confidence": 3, "ease": 4}}
+                                               if cls.__name__ == "Scorecard" else fake_ai(task, cls, web_, model))
+        ai.FAKE = weak
+        try:
+            slug = pipeline.new("override marking idea about trim levels", country="us")
+            pipeline.run(slug, say=lambda m: None)
+        finally:
+            ai.FAKE = fake_ai
+        pipeline.gate(slug, "go", "I want the numbers anyway")
+        g = store.gates(slug)[-1]
+        self.assertTrue(g["note"].startswith("OVERRIDE: GO although the first-look score was WEAK (33/100)"), g["note"])
+        self.assertIn("I want the numbers anyway", g["note"])
+        from vm import pdf
+        self.assertIn("GO although the first-look score was WEAK", pdf.build_html(slug))
+
     def test_pivot_resets_phase2_3(self):
         slug = pipeline.new("pivot test idea about stickers", country="gb")
         pipeline.run(slug, say=lambda m: None)
@@ -270,6 +322,36 @@ class Pipeline(unittest.TestCase):
 
 
 class Pure(unittest.TestCase):
+    def test_market_knockout_boundaries(self):
+        from vm.blocks import gates
+
+        class C:  # the smallest context knockouts() needs
+            def __init__(self, bottom_up):
+                self.v = {"data": {}}
+                self.mk = {"bottom_up_usd_year": bottom_up, "year1_goal_usd": 12000}
+
+            def read(self, name, default=None):
+                return self.mk
+        self.assertEqual(gates.knockouts(C(11999))[0], "KILL")                    # under 1x the goal: don't build
+        self.assertTrue(gates.knockouts(C(12001))[0].startswith("QUICK TEST"))   # 1x-3x: test at most
+        self.assertTrue(gates.knockouts(C(35999))[0].startswith("QUICK TEST"))
+        self.assertIsNone(gates.knockouts(C(36001))[0])
+
+    def test_link_targets_filter(self):
+        from vm.blocks.phase3 import link_reject_reason as r
+        for bad in ("bestnz-poker-casinoslot.com", "betwinnermirror.com", "betulcrime.com", "thcradar.com", "merrigoldfinance-loan.com"):
+            self.assertTrue(r({"domain": bad, "dr": 50}), bad)
+        self.assertTrue(r({"domain": "uncledspizza.com", "dr": 0}))             # no strength data: not worth an email
+        self.assertEqual(r({"domain": "indiehackers.com", "dr": 70}), "")
+        self.assertEqual(r({"domain": "betterprogramming.pub", "dr": 60}), "")   # 'bet' inside a normal word is fine
+
+    def test_weighted_click_price(self):
+        from vm.util import weighted_cpc
+        kws = [{"keyword": "a", "volume": 90, "cpc": 0, "intent": "buy"}, {"keyword": "b", "volume": 10, "cpc": 23.14, "intent": "buy"},
+               {"keyword": "c", "volume": 5000, "cpc": 30, "intent": "info"}]
+        self.assertEqual(weighted_cpc(kws), 2.31)   # not $23.14: one tiny expensive keyword cannot carry the score
+
+
     def test_score_formula(self):
         # (1000 x 2 x 1.5) / (10 + 5) = 200, rising +15% = 230
         self.assertEqual(phase2.score(1000, 2, "buy", 10), 200)

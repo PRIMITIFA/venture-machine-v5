@@ -85,3 +85,32 @@ def md_table(rows, cols):
 
 def has_number_or_source(line):
     return bool(re.search(r"\d", line) or re.search(r"https?://", line))
+
+
+# ---------- buying demand (one definition, used by every block and the report) ----------
+BUY_INTENTS = ("buy", "competitor", "brand-model")
+# how much of a search counts as OUR buying demand: someone typing only a rival's name wants that rival's site
+INTENT_VOLUME_W = {"buy": 1.0, "competitor": 1.0, "brand-model": 1.0, "brand": 0.1, "info": 0.0}
+
+
+def is_buy(k):
+    return k.get("intent") in BUY_INTENTS
+
+
+def buy_volume(kws):
+    """Searches a month that count as buying demand: commercial searches in full, a rival's bare brand name at 10%."""
+    return sum(num(k.get("volume")) * INTENT_VOLUME_W.get(k.get("intent"), 0.0) for k in kws)
+
+
+def volume_split(kws):
+    out = {"commercial": 0, "brand": 0, "info": 0}
+    for k in kws:
+        out["commercial" if is_buy(k) else "brand" if k.get("intent") == "brand" else "info"] += num(k.get("volume"))
+    return {k: int(v) for k, v in out.items()}
+
+
+def weighted_cpc(kws):
+    """Ad click price averaged by search volume over the commercial searches (a keyword with no price counts as $0)."""
+    buy = [k for k in kws if is_buy(k)]
+    vol = sum(num(k.get("volume")) for k in buy)
+    return round(sum(num(k.get("cpc")) * num(k.get("volume")) for k in buy) / vol, 2) if vol else 0.0

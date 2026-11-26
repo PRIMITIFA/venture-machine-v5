@@ -151,7 +151,7 @@ The state (blocks, gate decisions, the money ledger and the cache) is kept in `d
 |---|---|---|
 | **1** | after the idea filter | A **first-look score** out of 100 (3 checks out of 10: how much money, how sure, how easy; 60 or more is good). **GO** (start the paid keyword research) / **ANGLE** (the idea is weak as written, so test the other angle the machine found as its own idea, about 1 cent) / **KILL** (archived, never re-pitched) |
 | **2** | after the competitor and market research | **GO** / **PIVOT** (narrow to one country, B2B or a smaller segment; phases 2-3 re-run on it) / **KILL** |
-| **3** | after the plan | 7 checks, each scored out of 10, plus an overall score out of 100: under 60 is a KILL; 60-69 is a **QUICK TEST** (7 days, max $150, thresholds written first); 70 or more is **GO** to build |
+| **3** | after the plan | 7 checks, each scored out of 10, plus an overall score out of 100 (combined so one very low score pulls it down): under 60 is a KILL; 60-69 is a **QUICK TEST** (7 days, max $150, thresholds written first); 70 or more is **GO** to build. Knock-out: if the money reachable through Google search is below the first-year goal, it is a KILL as a search business whatever the score |
 
 Every block has its own pass/kill test from the spec, for example:
 - 02: a competitor must already be charging money.
@@ -179,7 +179,7 @@ Prices for the standard stack used by block 15 are in `vm/prices.json`. Edit the
 python -m unittest discover -s tests -v
 ```
 
-The tests are offline. They run all 18 blocks, the gates, a pivot, a duplicate kill and the budget cap against fake APIs.
+The tests are offline. They run all 18 blocks, the gates, a pivot, a duplicate kill and the budget cap against fake APIs. They also cover the rules that keep the numbers honest: off-topic searches, rival brand names, the link filter, the market knock-out and override marking (see `docs/BLOCKS.md`).
 
 ## Not in this repo (yet)
 

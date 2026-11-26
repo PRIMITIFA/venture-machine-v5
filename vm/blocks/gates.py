@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from .. import ai, store
 from ..config import S
 from ..pipeline import Result
-from ..util import num, read_csv
+from ..util import buy_volume, is_buy, num, read_csv, volume_split, weighted_cpc
 
 
 def _spent(c):
@@ -82,18 +82,24 @@ def memo2(c):
 
 def gate3_scores(c):
     kws = read_csv(c.path("08_keywords_clean.csv"))
-    buy = [k for k in kws if k["intent"] in ("buy", "competitor", "brand-model")]
-    buy_vol = sum(num(k["volume"]) for k in buy)
+    buy = [k for k in kws if is_buy(k)]
+    buy_vol = buy_volume(kws)          # commercial searches in full, a rival's bare brand name at 10%
+    sp = volume_split(kws)
+    w_cpc = weighted_cpc(kws)          # averaged by volume, so one tiny expensive keyword cannot carry the score
     max_cpc = max([num(k["cpc"]) for k in buy] or [0])
     mk = c.read("14_market_analysis.json")
-    ratio = mk["bottom_up_usd_year"] / max(mk["year1_goal_usd"], 1)
+    bottom_up = market_at_chosen_price(c, mk)
+    ratio = bottom_up / max(mk["year1_goal_usd"], 1)
     short = read_csv(c.path("11_shortlist.csv"))
     easy = sum(1 for r in short if r["kd"] != "" and num(r["kd"]) <= 20) / max(len(short), 1)
     seo_ = c.read("15_competitor_seo.json")
-    min_dr = min([num(s["dr"], 100) for s in seo_["competitors"]] or [100])
+    direct = [s for s in seo_["competitors"] if s.get("kind", "direct") == "direct" and s.get("dr") is not None]
+    min_dr = min([num(s["dr"], 100) for s in direct] or [100])
     clusters = c.read("10_clusters_serp.json")
     weak = sum(1 for cl in clusters if cl["weak_spots"]) / max(len(clusters), 1)
-    fixed = c.v["data"].get("budget_caps", {}).get("fixed_cost_usd_month", 0)
+    ads_seen = sum(num((cl.get("features") or {}).get("paid")) for cl in clusters) + num((c.read("04_niche_pulse.json", default={}) or {}).get("ads_on_top_term"))
+    caps = c.v["data"].get("budget_caps", {})
+    fixed = caps.get("fixed_cost_usd_month", 0)
     cost_share = fixed / max(mk["year1_goal_usd"] / 12, 1)
 
     def band(v, cuts):  # cuts for 5,4,3,2
@@ -102,19 +108,55 @@ def gate3_scores(c):
                 return s
         return 1
     kd_dr = round((band(easy, (0.6, 0.4, 0.25, 0.1)) + (5 if min_dr < 20 else 4 if min_dr < 40 else 3 if min_dr < 60 else 2 if min_dr < 75 else 1)) / 2)
+    # easy rankings are only worth something if people search: a small niche cannot score top marks for being empty
+    small = buy_vol < 300
+    rank_cap = 3 if small else 4 if buy_vol < 1000 else 5
+    kd_note = "" if kd_dr <= rank_cap else " Capped: easy to rank, but only %s buying searches a month, so the prize is small." % "{:,}".format(int(buy_vol))
+    value = band(w_cpc, (5, 3, 2, 1))
+    value_note = f"advertisers pay about ${w_cpc:.2f} per click on average across the buying searches (want $2+; the single highest is ${max_cpc:.2f})"
+    if value > 3 and not ads_seen:
+        value, value_note = 3, value_note + ". Capped: no advertiser was seen on any of these searches, so the click price is not proven."
     adv_reason = (c.v["data"].get("advantage_reason") or "").strip()
+    weak_s = min(band(weak, (0.5, 0.3, 0.2, 0.1)), 4 if small else 5)
     s = {
-        "demand": (band(buy_vol, (5000, 2000, 1000, 300)), f"{int(buy_vol):,} searches a month from people ready to buy (want 1,000+)"),
-        "value": (band(max_cpc, (5, 3, 2, 1)), f"advertisers pay up to ${max_cpc:.2f} per click (want $2+)"),
-        "market": (band(ratio, (50, 20, 10, 3)), f"the careful market guess is {ratio:.1f}x your first-year goal (want 10x+)"),
-        "kd_dr": (kd_dr, f"{easy:.0%} of the best searches are easy to rank for; weakest rival has strength {min_dr:.0f}/100"),
-        "weak_spots": (band(weak, (0.5, 0.3, 0.2, 0.1)), f"rivals are weak on {weak:.0%} of the page topics"),
+        "demand": (band(buy_vol, (5000, 2000, 1000, 300)),
+                   f"{int(buy_vol):,} buying searches a month (want 1,000+): {sp['commercial']:,} commercial, plus 10% of {sp['brand']:,} searches for a rival's name; {sp['info']:,} learning searches not counted"),
+        "value": (value, value_note),
+        "market": (band(ratio, (50, 20, 10, 3)), f"the money reachable through Google search is {ratio:.1f}x your first-year goal (want 10x+)"),
+        "kd_dr": (min(kd_dr, rank_cap), f"{easy:.0%} of the best searches are easy to rank for; weakest direct rival has strength {min_dr:.0f}/100.{kd_note}"),
+        "weak_spots": (weak_s, f"rivals are weak on {weak:.0%} of the page topics"),
         "advantage": (int(c.v["data"].get("advantage_score") or 3), adv_reason[:200] or "how much better we can be than the rivals (AI judgement)"),
         "costs": (5 if cost_share <= 0.05 else 4 if cost_share <= 0.10 else 3 if cost_share <= 0.20 else 2 if cost_share <= 0.40 else 1,
                   f"about ${fixed:.0f} a month to run, {cost_share:.0%} of your monthly goal"),
     }
-    avg = round(sum(v[0] for v in s.values()) / len(s), 2)
+    # geometric mean: one very low score pulls the whole result down instead of hiding behind the high ones
+    prod = 1.0
+    for v in s.values():
+        prod *= max(v[0], 1)
+    avg = round(prod ** (1 / len(s)), 2)
     return s, avg
+
+
+def market_at_chosen_price(c, mk):
+    """The search market at the price the business case actually chose (one price for market, economics and plan)."""
+    ue = c.v["data"].get("unit_economics") or {}
+    used, chosen = num(mk.get("price_used_usd") or mk.get("typical_price_usd")), num(ue.get("price_usd"))
+    if used and chosen:
+        return mk["bottom_up_usd_year"] * chosen / used
+    return mk["bottom_up_usd_year"]
+
+
+def knockouts(c):
+    """Rules that decide on their own, whatever the average says. Returns (forced recommendation or None, note)."""
+    mk = c.read("14_market_analysis.json")
+    goal = max(mk["year1_goal_usd"], 1)
+    ratio = market_at_chosen_price(c, mk) / goal
+    if ratio < 1:
+        return "KILL", (f"Knock-out: the money reachable through Google search (${ratio * goal:,.0f} a year) is smaller than your first-year goal "
+                        f"(${goal:,.0f}). As a search business this is a KILL. Only another channel (for example cold email) could carry it; test that as its own idea.")
+    if ratio < 3:
+        return "QUICK TEST (7 days, capped)", f"Capped at TEST: the money reachable through Google search is only {ratio:.1f}x your first-year goal (want 10x)."
+    return None, ""
 
 
 def memo3(c):
@@ -126,6 +168,9 @@ def memo3(c):
     if rec == "FULL BUILD" and fc is not None and fc < S.year1_goal_usd:
         rec = "QUICK TEST (7 days, capped)"
         cap_note = f"Capped at TEST: the likely first-year sales (${fc:,.0f}) are below your goal (${S.year1_goal_usd:,.0f})."
+    forced, ko = knockouts(c)
+    if forced == "KILL" or (forced and rec == "FULL BUILD"):
+        rec, cap_note = forced, ko
     store.set_data(c.slug, gate3_score=avg, gate3_score100=round(avg * 20), gate3_recommendation=rec, gate3_cap_note=cap_note)
     ue = c.v["data"].get("unit_economics", {})
     qs = c.read("16_owner_questions.md", default="")
@@ -210,8 +255,8 @@ def light_scores(c):
                 return s_
         return 1
     kws = read_csv(c.path("08_keywords_clean.csv")) if c.has("08_keywords_clean.csv") else []
-    buy = [k for k in kws if k["intent"] in ("buy", "competitor", "brand-model")]
-    buy_vol = sum(num(k["volume"]) for k in buy)
+    buy = [k for k in kws if is_buy(k)]
+    buy_vol = buy_volume(kws)
     max_cpc = max([num(k["cpc"]) for k in buy] or [0])
     how = c.read("02_how_analysis.json", default={}) or {}
     priced = [x for x in how.get("competitors", []) if x.get("price") and "unknown" not in x["price"].lower()]
@@ -225,7 +270,7 @@ def light_scores(c):
     elif ch is not None and ch < -10:
         alive = 3
     else:
-        alive = 5 if st_ == "alive" else 3
+        alive = 5 if st_ == "alive" else 2 if st_ == "unknown" else 3
     clusters = c.read("10_clusters_serp.json", default=[]) or []
     easy = sum(1 for cl in clusters[:15] if cl.get("kd") not in ("", None) and num(cl["kd"]) <= 30) / max(min(len(clusters), 15), 1)
     sc = c.read("05_scorecard.json", default={}) or {}

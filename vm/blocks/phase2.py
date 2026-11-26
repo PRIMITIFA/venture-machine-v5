@@ -8,9 +8,16 @@ from pydantic import BaseModel, Field
 from .. import ai, seo
 from ..config import K, S
 from ..pipeline import Result
-from ..util import domain_of, num, pct_change, read_csv, write_csv
+from .. import store
+from ..util import BUY_INTENTS, buy_volume, domain_of, is_buy, num, pct_change, read_csv, volume_split, write_csv
 
-INTENT_W = {"buy": 1.5, "competitor": 1.3, "brand-model": 1.2, "info": 0.6}
+INTENT_W = {"buy": 1.5, "competitor": 1.3, "brand-model": 1.2, "brand": 0.4, "info": 0.6}
+INTENTS = Literal["buy", "competitor", "brand", "brand-model", "info"]
+INTENT_HELP = """intent: buy (wants to pay for or use a product like ours now); competitor (a rival's name PLUS a comparing word:
+"X alternative", "X vs Y", "X review", "X pricing"); brand (ONLY a rival's brand or product name, nothing else: the searcher
+wants to go to that rival's site); brand-model (a specific item or model the buyer wants from us); info (wants to learn, wants
+a course or a guide, or is a seller/freelancer looking for tips)."""
+KW_COLS = ["keyword", "volume", "cpc", "cpc_low", "cpc_high", "competition", "trend12", "intent", "source", "fetched_at"]
 
 
 # ---------------- 06 Seeds ----------------
@@ -52,7 +59,7 @@ Cover buying words, product names, brands and competitors. Language: {c.lang}. C
 # ---------------- 07 Volume, CPC, cleaning ----------------
 class Label(BaseModel):
     keyword: str
-    intent: Literal["buy", "competitor", "brand-model", "info"]
+    intent: INTENTS
     junk: bool = Field(description="true if unrelated to the business, wrong meaning, or a navigational query for a giant")
 
 
@@ -98,8 +105,8 @@ def b07_volumes(c):
         chunk = [r["keyword"] for r in kept[i:i + 150]]
         out = ai.ask_json(
             f"""Block 07. Label each keyword for this business: {c.v['one_liner']}
-intent: buy (wants to pay/use a product now), competitor (names a competitor or 'X alternative'),
-brand-model (a brand/model/specific item), info (wants to learn). junk=true if unrelated or wrong meaning.
+{INTENT_HELP}
+junk=true if unrelated or wrong meaning.
 Return one label per keyword, same spelling.{c.note()}""",
             Labels, smart=False, context={"keywords": chunk})
         labels.update({l.keyword.strip().lower(): l for l in out.labels})
@@ -113,12 +120,13 @@ Return one label per keyword, same spelling.{c.note()}""",
         r["fetched_at"] = fetched
         clean.append(r)
     clean.sort(key=lambda r: -num(r["volume"]))
-    write_csv(c.path("08_keywords_clean.csv"), clean,
-              ["keyword", "volume", "cpc", "cpc_low", "cpc_high", "competition", "trend12", "intent", "source", "fetched_at"])
-    buy = [r for r in clean if r["intent"] in ("buy", "competitor", "brand-model")]
-    buy_vol = sum(num(r["volume"]) for r in buy)
+    write_csv(c.path("08_keywords_clean.csv"), clean, KW_COLS)
+    buy = [r for r in clean if is_buy(r)]
+    buy_vol = buy_volume(clean)
+    sp = volume_split(clean)
     max_cpc = max([num(r["cpc"]) for r in buy] or [0])
-    summary = f"{len(clean)} clean keywords ({dropped} dropped <20/mo); buying volume {int(buy_vol)}/mo; top buying CPC ${max_cpc:.2f}"
+    summary = (f"{len(clean)} clean keywords ({dropped} dropped <20/mo); buying volume {int(buy_vol)}/mo "
+               f"(commercial {sp['commercial']}, rival brand names {sp['brand']} counted at 10%, info {sp['info']} not counted); top buying CPC ${max_cpc:.2f}")
     if not clean:
         return Result("redo", "no keyword has volume >= 20; seeds are too narrow or wrong language")
     if buy_vol >= 1000 or max_cpc >= 2.0:
@@ -159,6 +167,36 @@ def cluster(serps, min_shared=4):
     return out
 
 
+class SerpCheck(BaseModel):
+    keyword: str
+    on_topic: bool = Field(description="true only if the pages Google shows for this search are about the same thing as this business. "
+                                       "false if the word means something else there (another field, an acronym, a school or government programme), "
+                                       "or the searchers are clearly a different group (sellers, students) that would never buy this")
+    intent: INTENTS
+    reason: str = Field(description="one short sentence, naming what the results are really about when off-topic")
+
+
+class SerpChecks(BaseModel):
+    checks: list[SerpCheck]
+
+
+def check_relevance(c, serps):
+    """Read what Google really shows for each search and drop the ones that mean something else. Returns {keyword: SerpCheck}."""
+    out = {}
+    for i in range(0, len(serps), 40):
+        ctx = [{"keyword": s["keyword"], "labelled_intent": s.get("intent"),
+                "page1": ["%s | %s" % (o["domain"], (o.get("title") or "")[:90]) for o in s["organic"][:10]],
+                "people_also_ask": (s.get("questions") or [])[:4]} for s in serps[i:i + 40]]
+        res = ai.ask_json(
+            f"""Block 08 relevance check for this business: {c.v['one_liner']}
+For each search, look at the real page-1 results and the questions people ask. Decide if the search is on-topic for THIS
+business, and fix the intent label if the results show it is wrong.
+{INTENT_HELP}
+Return one check per keyword, same spelling.{c.note()}""", SerpChecks, smart=False, context={"searches": ctx})
+        out.update({x.keyword.strip().lower(): x for x in res.checks})
+    return out
+
+
 def b08_serp_clusters(c):
     kws = read_csv(c.path("08_keywords_clean.csv"))
     for k in kws:
@@ -169,8 +207,26 @@ def b08_serp_clusters(c):
     for s in raw:
         m = meta.get(s["keyword"], {})
         s["volume"], s["intent"], s["cpc"] = num(m.get("volume")), m.get("intent", "info"), num(m.get("cpc"))
+    fetched_ok = [s for s in raw if not s.get("error") and s["organic"]]
+    checks = check_relevance(c, fetched_ok) if fetched_ok else {}
+    dropped = []
+    for s in fetched_ok:
+        ck = checks.get(s["keyword"].lower())
+        if not ck:
+            continue
+        if not ck.on_topic:
+            s["off_topic"], s["off_topic_reason"] = True, ck.reason
+            dropped.append({"keyword": s["keyword"], "volume": int(s["volume"]), "reason": ck.reason})
+        elif ck.intent != s["intent"]:
+            s["intent"] = ck.intent
     c.write("09_serp_raw.json", raw)
-    ok = [s for s in raw if not s.get("error") and s["organic"]]
+    # the keyword list every later block reads: off-topic searches out, intents corrected from the real results
+    off = {d["keyword"] for d in dropped}
+    fixed = {s["keyword"]: s["intent"] for s in fetched_ok}
+    kept = [dict({k_: v_ for k_, v_ in k.items() if k_ != "prio"}, intent=fixed.get(k["keyword"], k["intent"])) for k in kws if k["keyword"] not in off]
+    write_csv(c.path("08_keywords_clean.csv"), kept, KW_COLS)
+    write_csv(c.path("08_keywords_dropped.csv"), dropped, ["keyword", "volume", "reason"])
+    ok = [s for s in fetched_ok if not s.get("off_topic")]
     top10_domains = {o["domain"] for s in ok for o in s["organic"] if o["rank"] and o["rank"] <= 10}
     ranks = seo.domain_ranks(top10_domains) if top10_domains else {}
     clusters = []
@@ -197,11 +253,15 @@ def b08_serp_clusters(c):
             "top10": [{"rank": o["rank"], "domain": o["domain"], "url": o["url"], "title": o["title"], "dr": ranks.get(o["domain"])} for o in top10],
         })
     c.write("10_clusters_serp.json", clusters)
-    fetched = len(ok) / max(len(raw), 1)
+    fetched = len(fetched_ok) / max(len(raw), 1)
     opp = sum(1 for cl in clusters if cl["weak_spots"] or cl["better_format_possible"]) / max(len(clusters), 1)
     hard = sum(1 for cl in clusters if cl["top5_all_dr60"]) / max(len(clusters), 1)
-    summary = (f"{len(ok)}/{len(raw)} SERPs; {len(clusters)} clusters; {opp:.0%} with a weak spot or better-format chance; "
+    summary = (f"{len(fetched_ok)}/{len(raw)} SERPs; {len(clusters)} clusters; {opp:.0%} with a weak spot or better-format chance; "
                f"{hard:.0%} have all top-5 DR 60+")
+    if dropped:
+        summary += "; %d off-topic searches removed (%s)" % (len(dropped), ", ".join("%s %d/mo" % (d["keyword"], d["volume"]) for d in dropped[:4]))
+    if not ok:
+        return Result("redo", summary + "; every search was off-topic: the seeds mean something else on Google")
     if fetched < 0.9:
         return Result("redo", summary + "; too many SERPs failed")
     if hard > 0.8:
@@ -215,6 +275,18 @@ def score(volume, cpc, intent, kd, trend12=None):
     if trend12 is not None and trend12 != "" and num(trend12) > 10:
         s *= 1.15
     return round(s, 2)
+
+
+class RivalKind(BaseModel):
+    domain: str
+    kind: Literal["direct", "generalist", "off-target"] = Field(description="direct = sells or gives away the same kind of thing to the same buyer; "
+                                                                "generalist = a big general tool or media site that only touches this topic; "
+                                                                "off-target = about something else")
+    reason: str
+
+
+class RivalKinds(BaseModel):
+    rivals: list[RivalKind]
 
 
 def b09_shortlist(c):
@@ -251,16 +323,62 @@ def b09_shortlist(c):
             seen_in[o["domain"]] += 1
             dr[o["domain"]] = o.get("dr")
     how = c.read("02_how_analysis.json")
-    known = {domain_of(x["url"]) for x in how["competitors"]}
-    comps = [{"domain": d, "weight": round(w, 1), "serps": seen_in[d], "dr": dr.get(d), "known_in_02": d in known}
-             for d, w in sorted(weight.items(), key=lambda x: -x[1])[:5]]
+    known = {}
+    for x in how["competitors"]:
+        d_ = domain_of(x["url"])
+        if d_ and seo.VALID_DOMAIN.match(d_) and not seo.not_competitor(d_):
+            known.setdefault(d_, x)
+    cand = [d for d, _w in sorted(weight.items(), key=lambda x: -x[1])[:10]]
+    titles = defaultdict(list)
+    for cl in clusters:
+        for o in cl["top10"]:
+            if o["domain"] in cand and len(titles[o["domain"]]) < 3:
+                titles[o["domain"]].append("%s -> %s" % (cl["head"], (o.get("title") or "")[:80]))
+    kinds = {}
+    if cand:
+        res = ai.ask_json(
+            f"""Block 09. Which of these sites are real rivals of this business: {c.v['one_liner']}
+They rank on Google for our searches. Classify each one; judge by what the site sells, not by where it ranks.{c.note()}""",
+            RivalKinds, smart=False, context={"sites": [{"domain": d, "ranks_for": titles[d]} for d in cand],
+                                              "rivals_already_known_to_charge_money": list(known)})
+        kinds = {x.domain.strip().lower(): x for x in res.rivals}
+    row = lambda d, src: {"domain": d, "weight": round(weight.get(d, 0), 1), "serps": seen_in.get(d, 0), "dr": dr.get(d),
+                          "known_in_02": d in known, "source": src, "kind": (kinds[d].kind if d in kinds else "direct"),
+                          "why": (kinds[d].reason if d in kinds else ("charges money for this (block 02): " + known[d]["price"])[:160] if d in known else "")}
+    direct = [row(d, "google page 1") for d in cand if (kinds.get(d) is None or kinds[d].kind == "direct")]
+    general = [row(d, "google page 1") for d in cand if kinds.get(d) is not None and kinds[d].kind == "generalist"]
+    removed = [{"domain": d, "why": kinds[d].reason} for d in cand if kinds.get(d) is not None and kinds[d].kind == "off-target"]
+    # rivals known to charge money (block 02) are real rivals even when they do not rank: keep room for at least 2 of them
+    extra = [d for d in known if d not in {x["domain"] for x in direct}]
+    comps = direct[:5 - min(2, len(extra))]
+    comps += [row(d, "block 02") for d in extra[:5 - len(comps)]]
+    if len(comps) < 3:
+        comps += general[:3 - len(comps)]
+    missing_dr = [x["domain"] for x in comps if x["dr"] is None]
+    if missing_dr:
+        got = seo.domain_ranks(missing_dr)
+        for x in comps:
+            x["dr"] = got.get(x["domain"], x["dr"])
     c.write("11_top_competitors.json", comps)
+    c.write("11_competitors_removed.json", {"off_target": removed, "generalist_not_used": [x["domain"] for x in general if x["domain"] not in {y["domain"] for y in comps}]})
+    # trend from the real keywords (12 months, weighted by volume): the fallback when Google Trends had no data
+    tk = [(num(r["trend12"]), num(r["volume"])) for r in rows if r.get("trend12") not in ("", None) and r["intent"] != "info"]
+    kw_trend = round(sum(t * v for t, v in tk) / sum(v for _t, v in tk), 1) if tk and sum(v for _t, v in tk) else None
+    store.set_data(c.slug, kw_trend_12m_pct=kw_trend)
+    pulse = c.read("04_niche_pulse.json", default=None)
+    if pulse is not None:
+        pulse["kw_trend_12m_pct"] = kw_trend
+        if pulse.get("status") == "unknown" and kw_trend is not None:
+            pulse["status"] = "alive" if kw_trend >= -10 else "flat" if kw_trend >= -30 else "dying"
+            pulse["status_source"] = "12-month search volume of our own keywords (Google Trends had no data)"
+        c.write("04_niche_pulse.json", pulse)
     top20 = clusters[:20]
-    buy_clusters = sum(1 for cl in top20 if cl["intent"] in ("buy", "competitor", "brand-model"))
-    buy_easy = sum(1 for r in rows if r["intent"] in ("buy", "competitor", "brand-model") and r["kd"] != "" and num(r["kd"]) <= 20)
+    buy_clusters = sum(1 for cl in top20 if cl["intent"] in BUY_INTENTS)
+    buy_easy = sum(1 for r in rows if is_buy(r) and r["kd"] != "" and num(r["kd"]) <= 20)
     hard_all = all(num(r["kd"]) >= 50 for r in rows if r["kd"] != "")
     summary = (f"{buy_clusters} buying clusters in top 20; {buy_easy} buying keywords KD<=20; "
-               f"top competitors: {', '.join(x['domain'] for x in comps)}")
+               f"top competitors: {', '.join(x['domain'] for x in comps)}"
+               + ("; removed as off-target: " + ", ".join(x["domain"] for x in removed) if removed else ""))
     if not comps:
         return Result("redo", "no real competitor domain found in the SERPs")
     if all(r["intent"] == "info" for r in rows):

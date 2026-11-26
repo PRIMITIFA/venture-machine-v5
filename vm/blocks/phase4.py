@@ -137,8 +137,11 @@ def b16_economics(c):
     caps = costs["budget_caps"]
     pay = next((s for s in PRICES["stack"] if "fee_pct" in s), {"fee_pct": 5.0, "fee_fixed_usd": 0.4})
     kws = read_csv(c.path("08_keywords_clean.csv"))
-    buy_cpcs = [num(k["cpc"]) for k in kws if k["intent"] in ("buy", "competitor", "brand-model") and num(k["cpc"]) > 0]
-    avg_cpc = round(sum(buy_cpcs) / len(buy_cpcs), 2) if buy_cpcs else 1.0
+    from ..util import is_buy
+    priced = [k for k in kws if is_buy(k) and num(k["cpc"]) > 0]
+    vol = sum(num(k["volume"]) for k in priced)
+    # click price averaged by volume over the buying searches that have a price (what a real ad budget would pay)
+    avg_cpc = round(sum(num(k["cpc"]) * num(k["volume"]) for k in priced) / vol, 2) if vol else 1.0
     ctx = {"costs": costs, "scorecard": c.read("05_scorecard.json"), "market": c.read("14_market_analysis.json"),
            "shortlist": read_csv(c.path("11_shortlist.csv"))[:25], "competitor_business": c.read("13_competitor_business.json"),
            "avg_buying_cpc_usd": avg_cpc, "payment_fees": pay}
@@ -159,7 +162,15 @@ retention months, sales per 1,000 visits, owner hours/month and sources. Python 
     ue = {"chosen": best, "options": opts, "avg_buying_cpc_usd": avg_cpc, "ladder": ladder(int(mvp)),
           "formulas": {"net_per_sale": "price - data cost - fees", "max_cac": "net x retention months",
                        "breakeven_cpc": "net x retention x conversion", "paid_search_cac": "avg buying CPC / conversion"}}
-    store.set_data(c.slug, unit_economics={k: best[k] for k in ("model", "price_usd", "net_per_sale", "max_cac", "breakeven_cpc", "paid_search_cac")})
+    store.set_data(c.slug, unit_economics={k: best[k] for k in ("model", "price_usd", "net_per_sale", "max_cac", "breakeven_cpc", "paid_search_cac")},
+                   chosen_price_usd=best["price_usd"])
+    # one price everywhere: restate the search market at the price that was chosen
+    mkt = c.read("14_market_analysis.json")
+    used = num(mkt.get("price_used_usd") or mkt.get("typical_price_usd"))
+    if used:
+        mkt["bottom_up_at_chosen_price_usd_year"] = round(mkt["bottom_up_usd_year"] * best["price_usd"] / used)
+        mkt["chosen_price_usd"] = best["price_usd"]
+        c.write("14_market_analysis.json", mkt)
     c.write("16_unit_economics.json", ue)
     lines = out.strengths + out.weaknesses + out.opportunities + out.threats
     missing = [l for l in lines if not has_number_or_source(l)]
@@ -228,16 +239,28 @@ def b17_plan(c):
 2) Sitemap: home page on the strongest keyword, 1 page = 1 cluster (use cluster_id), money page on the strongest buying
 intent. Plan at least 20 pages (or one per cluster if fewer). EVERY page needs its own unique data source - pages that only
 swap the keyword in a template are not allowed.
-3) One link-bait asset and the AI-search plan. 4) Rate our edge 1-5.{c.note()}""",
+3) One link-bait asset and the AI-search plan. 4) Rate our edge 1-5 and give the reason as facts (price, data, speed, channel), not opinion.
+RULES: use the chosen price from the business case everywhere, in one currency. One main keyword belongs to ONE page only; a page
+without its own cluster must say "support page, no target keyword" as its data source and does not count toward the 20.
+The forecast must be reachable from the search market in the context; if that market is below the first-year goal, say that search
+alone will not reach the goal and make the first product-line item the cheapest validation test (pre-sale or cold email) before any page is built.
+Never give away free the same data the paid product sells.{c.note()}""",
         Plan, smart=True, context={"clusters": cl_info, "business_case": c.read("18_business_case.md"),
+                                   "search_market": {k: c.read("14_market_analysis.json").get(k) for k in ("bottom_up_usd_year", "bottom_up_at_chosen_price_usd_year", "buying_searches_month", "year1_goal_usd")},
+                                   "chosen_price_usd": c.v["data"].get("chosen_price_usd"),
                                    "eeat": c.read("03_eeat_quality.json"), "gap": c.read("13_competitor_business.json").get("identified_gap"),
                                    "ux_weaknesses": [x.get("weaknesses") for x in c.read("12_competitor_ux.json")["competitors"]],
                                    "questions_people_ask": [q["question"] for q in c.read("15_questions.json", default=[])][:30],
                                    "searches_rivals_get_we_missed": read_csv(c.path("15_keyword_gap.csv"))[:20] if c.has("15_keyword_gap.csv") else []})
     cmap = {cl["id"]: cl for cl in clusters}
     pages = []
+    used_clusters = set()
     for p in out.pages:
         cl = cmap.get(p.cluster_id, {})
+        if p.cluster_id in used_clusters:
+            cl = {}  # a second page on the same search would compete with the first: it is a support page with no target keyword
+        elif cl:
+            used_clusters.add(p.cluster_id)
         pages.append(p.model_dump() | {"head": cl.get("head", ""), "volume": cl.get("volume", 0), "kd": cl.get("kd", ""), "intent": cl.get("intent", "")})
     c.write("19_sitemap.json", {"pages": pages})
     # 90-day calendar: easiest (lowest KD) first, home + money page in week 1, ~2-3 pages a week, link outreach alongside
@@ -288,7 +311,9 @@ Assumptions: {out.forecast_assumptions}
     dup_src = len(sources) - len(set(sources))
     templ = [_template_title(p["title"], p["head"]) for p in pages if p["head"]]
     dup_tpl = len(templ) - len(set(templ))
-    summary = f"{len(pages)} pages planned; edge {out.advantage_score}/5; forecast mid ${out.forecast_12m_usd.get('mid', 0):,.0f}/yr"
+    targeted = sum(1 for p in pages if p["head"])
+    summary = (f"{len(pages)} pages planned ({targeted} with their own search, {len(pages) - targeted} support pages); "
+               f"edge {out.advantage_score}/5; forecast mid ${out.forecast_12m_usd.get('mid', 0):,.0f}/yr")
     if len(pages) < need:
         return Result("redo", f"only {len(pages)} pages; plan at least {need}")
     if dup_src > len(pages) * 0.2 or dup_tpl > len(pages) * 0.3:
