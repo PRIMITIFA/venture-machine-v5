@@ -71,11 +71,26 @@ def venture_page(slug):
         st = v["status"]
         btn = lambda d, cls="": (f"<form class=inline method=post action='/gate/{e(slug)}'><input type=hidden name=decision value={d}>"
                                  f"<button class='{cls}'>{d.upper()}</button></form> ")
+        ang = v["data"].get("other_angle") or {}
+        angle_btn = ""
+        if v["data"].get("angle_slug") and store.venture(v["data"]["angle_slug"]):
+            angle_btn = f"<a href='/v/{e(v['data']['angle_slug'])}'><button>Open the other angle</button></a> "
+        elif ang.get("idea"):
+            angle_btn = (f"<form class=inline method=post action='/gate/{e(slug)}'><input type=hidden name=decision value=angle>"
+                         f"<button class='{'primary' if (v['data'].get('first_score100') or 100) < 60 else ''}'>Test the other angle (about 1 cent)</button></form> ")
+        if v["data"].get("angle_of"):
+            acts += (f"<div class=card>This is the <b>other angle</b> of <a href='/v/{e(v['data']['angle_of'])}'>{e(v['data'].get('parent_idea') or v['data']['angle_of'])}</a>"
+                     f" (that idea scored {e(v['data'].get('parent_score100', '?'))}/100).</div>")
+        if ang.get("idea") and st in ("gate_05", "light_done", "kill_recommended"):
+            acts += (f"<div class=card><b>Another angle that could work</b><p>{e(ang['idea'])}</p><p class=mute>{e(ang.get('why', ''))}</p>"
+                     f"<p class=mute>Cheapest test: {e(ang.get('cheapest_test', ''))}</p><p>{angle_btn}</p></div>")
         if st.startswith("gate_"):
             b = pipeline.by_id()[st.removeprefix("gate_")]
             memo = store.block(slug, b.id).get("summary", "")
             acts += f"<div class=card><b>{e(b.name)}</b><pre>{e(memo)}</pre><p>"
             for d in b.decisions:
+                if d == "angle":
+                    continue  # shown in its own card above
                 if d == "pivot":
                     acts += (f"<form method=post action='/gate/{e(slug)}' style='margin:8px 0'><input type=hidden name=decision value=pivot>"
                              f"<input name=note placeholder='Pivot to... (e.g. UK only, B2B dealers)' required style='width:60%'> <button>PIVOT</button></form>")
@@ -166,6 +181,10 @@ class H(BaseHTTPRequestHandler):
                 slug = path[6:]
                 pipeline.gate(slug, f.get("decision", ""), f.get("note", ""))
                 report.write(slug)
+                if f.get("decision") == "angle":
+                    child = store.venture(slug)["data"]["angle_slug"]
+                    start(child)
+                    return self.send(303, "", loc=f"/v/{child}")
                 if f.get("decision") in ("go", "pivot", "override"):
                     start(slug)
                 return self.send(303, "", loc=f"/v/{slug}")

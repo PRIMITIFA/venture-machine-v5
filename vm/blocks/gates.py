@@ -14,14 +14,47 @@ def _spent(c):
     return f"spent so far ${store.spent(c.slug):.2f} of ${cap_usd(c.v['data'].get('depth', 'full')):.2f}"
 
 
+FIRST_QUESTIONS = {"impact": "How much money could it make?", "confidence": "How sure are we it will work?", "ease": "How easy is it to build and sell?"}
+FIRST_PASS = 60  # first-look score out of 100; under this the idea is weak as written
+
+
+def first_scores(c):
+    """The phase 1 (first look) score: 3 checks. Values are on the same 1-5 scale as the other scorecards (shown x2 = out of 10)."""
+    sc = c.read("05_scorecard.json", default=None)
+    if not sc:
+        return None, None
+    ice = sc["ice"]
+    fallback = {"impact": "how big the win could be (AI judgement from what phase 1 found)",
+                "confidence": "how sure the evidence makes us (AI judgement)", "ease": "how easy it is to build and to sell (AI judgement)"}
+    s = {k: (ice[k] / 2, (ice.get(k + "_why") or fallback[k])[:220]) for k in ("impact", "confidence", "ease")}
+    return s, round(sum(v[0] for v in s.values()) / len(s), 2)
+
+
+def other_angle(c_or_v):
+    """The other angle from block 04, or None."""
+    v = c_or_v.v if hasattr(c_or_v, "v") else c_or_v
+    a = v["data"].get("other_angle")
+    return a if a and a.get("idea") else None
+
+
 def memo1(c):
     sc = c.read("05_scorecard.json")
     e = c.read("03_eeat_quality.json")
     n = c.read("04_niche_pulse.json")
     eeat_ok = sum(1 for k in ("real_person_or_company", "expertise_proof", "unique_data_per_page", "contacts_policies_real_example") if e[k]["ok"])
-    lines = sc["summary_3_lines"] + [
+    score = round(sc["ice_avg"] * 10)
+    ang = sc.get("other_angle")
+    head = [f"First-look score {score}/100 -> " + ("GOOD ENOUGH: worth the paid research" if score >= FIRST_PASS else
+                                                    "WEAK as written" + (": test the other angle" if ang else ""))]
+    head += [f"  {FIRST_QUESTIONS[k]:34} {sc['ice'][k]:>2}/10  {sc['ice'].get(k + '_why', '')}".rstrip() for k in FIRST_QUESTIONS]
+    if ang:
+        head += ["Other angle that could work: " + ang["idea"], "  Why: " + ang["why"], "  Cheapest test: " + ang["cheapest_test"],
+                 f"  Check it (about 1 cent): vm gate {c.slug} angle"]
+    if c.v["data"].get("angle_of"):
+        head.append(f"This idea is the other angle of '{c.v['data']['angle_of']}' (that one scored {c.v['data'].get('parent_score100', '?')}/100).")
+    lines = head + sc["summary_3_lines"] + [
         f"ICE {sc['ice_avg']} | MVP {sc['effort']['days_to_mvp']} days | ~${sc['effort']['monthly_cost_usd']}/mo | blockers: {', '.join(sc['blockers']) or 'none'}",
-        f"E-E-A-T {eeat_ok}/4 ok, YMYL {e['ymyl_level']} | niche {n['status']} (24-mo trend {n.get('change_24m_pct_best')}%)",
+        f"E-E-A-T {eeat_ok}/4 ok, YMYL {e['ymyl_level']} | niche {n['status']} (" + (f"24-mo trend {n['change_24m_pct_best']}%" if n.get('change_24m_pct_best') is not None else "not enough search history for a trend") + ")",
         f"Biggest unknown: {sc['biggest_unknown']}", _spent(c)]
     return Result("pass", "\n".join(lines))
 

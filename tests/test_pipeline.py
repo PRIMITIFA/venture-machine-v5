@@ -100,7 +100,9 @@ def fake_ai(task, cls, web_, model):
         "Pulse": {"rising_synonyms": ["monroney label"], "new_competitors_12m": ["https://new.com"], "fresh_discussions_90d": ["https://reddit.com/r/x/1"]},
         "Scorecard": {"pros": ["a"] * 5, "cons": ["b"] * 5, "biggest_unknown": "conversion", "summary_3_lines": ["1", "2", "3"],
                       "effort": {"days_to_mvp": 7, "monthly_cost_usd": 30, "api_dependencies": ["x"], "owner_hours_per_week": 5},
-                      "ice": {"impact": 7, "confidence": 6, "ease": 8}, "synergy": "cold email", "blockers": []},
+                      "ice": {"impact": 7, "confidence": 6, "ease": 8, "impact_why": "many buyers"}, "synergy": "cold email", "blockers": [],
+                      "other_angle": {"idea": "Car dealers want bulk window sticker PDFs for their listings and would pay $49 a month",
+                                      "why": "dealers buy many at once", "cheapest_test": "cold email 100 dealers"}},
         "Seeds": {"seeds": [{"keyword": k, "category": "buy" if i % 2 else "product", "source": "t"} for i, k in enumerate(KWS[:45])]},
         "Ux": {"competitors": [{"domain": d, "steps_to_checkout_estimate": 5, "weaknesses": ["no sample"], "strengths": ["fast"]} for d in DOMAINS]},
         "Business": {"competitors": [{"domain": "comp1.com", "plans": [{"name": "Basic", "price": "$19", "billing": "one-time"}], "free_tier": "no",
@@ -192,6 +194,37 @@ class Pipeline(unittest.TestCase):
         pipeline.deepen(slug, "full")
         self.assertEqual(store.venture(slug)["data"]["depth"], "full")
         self.assertEqual(pipeline.run(slug, say=lambda m: None), "gate_14")  # gate 1 already passed by deepening
+
+    def test_first_look_score_and_other_angle(self):
+        weak = lambda task, cls, web_, model: (fake_ai(task, cls, web_, model) | {"ice": {"impact": 3, "confidence": 3, "ease": 4}}
+                                               if cls.__name__ == "Scorecard" else fake_ai(task, cls, web_, model))
+        ai.FAKE = weak
+        try:
+            slug = pipeline.new("weak consumer idea about sticker subscriptions", country="us")
+            said = []
+            self.assertEqual(pipeline.run(slug, say=said.append), "gate_05")
+        finally:
+            ai.FAKE = fake_ai
+        v = store.venture(slug)
+        self.assertEqual(v["data"]["first_score100"], 33)
+        self.assertIn("First-look score 33/100", said[-1])
+        self.assertIn(f"vm gate {slug} angle", said[-1])
+        from vm import pdf
+        h = pdf.build_html(slug)
+        for part in ("WEAK AS IT IS: TRY THE OTHER ANGLE", "ANOTHER ANGLE THAT COULD WORK", "Car dealers want bulk", "First look", "33/100", "not yet"):
+            self.assertIn(part, h)
+        msg = pipeline.gate(slug, "angle")
+        child = store.venture(slug)["data"]["angle_slug"]
+        self.assertIn(child, msg)
+        self.assertEqual(store.venture(slug)["status"], "gate_05")  # the main idea is left as it is
+        self.assertEqual(store.venture(child)["data"]["angle_of"], slug)
+        self.assertIn("Car dealers", store.venture(child)["idea"])
+        self.assertEqual(pipeline.run(child, say=lambda m: None), "gate_05")  # not killed as a duplicate of its parent
+        self.assertEqual(store.venture(child)["data"]["first_score100"], 70)
+        h2 = pdf.build_html(child)
+        self.assertIn("This is the other angle", h2)
+        self.assertIn("GOOD FIRST LOOK", h2)
+        self.assertIn("already saved", pipeline.gate(slug, "angle"))  # asking twice does not make a second copy
 
     def test_pivot_resets_phase2_3(self):
         slug = pipeline.new("pivot test idea about stickers", country="gb")

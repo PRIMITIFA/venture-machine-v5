@@ -123,7 +123,7 @@ This opens http://127.0.0.1:8765. Then:
 ```bash
 python vm.py new "People who buy used cars want the original window sticker and would pay $15 for it" --country us
 python vm.py run <slug>             # runs until the next gate
-python vm.py gate <slug> go         # or: kill | pivot "UK dealers only" | test | override "why"
+python vm.py gate <slug> go         # or: kill | angle | pivot "UK dealers only" | test | override "why"
 python vm.py show <slug>            # block-by-block status
 python vm.py list                   # every idea (killed ones stay, so they are never re-pitched)
 python vm.py rerun <slug> 07        # redo a block and everything after it
@@ -149,7 +149,7 @@ The state (blocks, gate decisions, the money ledger and the cache) is kept in `d
 
 | Gate | When | Choices |
 |---|---|---|
-| **1** | after the idea filter | **GO** (start the paid keyword research) / **KILL** (archived, never re-pitched) |
+| **1** | after the idea filter | A **first-look score** out of 100 (3 checks out of 10: how much money, how sure, how easy; 60 or more is good). **GO** (start the paid keyword research) / **ANGLE** (the idea is weak as written, so test the other angle the machine found as its own idea, about 1 cent) / **KILL** (archived, never re-pitched) |
 | **2** | after the competitor and market research | **GO** / **PIVOT** (narrow to one country, B2B or a smaller segment; phases 2-3 re-run on it) / **KILL** |
 | **3** | after the plan | 7 checks, each scored out of 10, plus an overall score out of 100: under 60 is a KILL; 60-69 is a **QUICK TEST** (7 days, max $150, thresholds written first); 70 or more is **GO** to build |
 

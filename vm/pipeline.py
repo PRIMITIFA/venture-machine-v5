@@ -80,7 +80,7 @@ def registry():
         Block("02", "Business, data and E-E-A-T", 1, "auto", phase1.b02_how_eeat),
         Block("03", "Niche alive or dead", 1, "auto", phase1.b03_niche_pulse),
         Block("04", "ICE score + MVP effort", 1, "auto", phase1.b04_ice),
-        Block("05", "GATE 1: Go / Kill", 1, "gate", gates.memo1, ("go", "kill")),
+        Block("05", "GATE 1: Go / Kill", 1, "gate", gates.memo1, ("go", "angle", "kill")),
         Block("06", "Seeds (30-60 keywords)", 2, "auto", phase2.b06_seeds),
         Block("07", "Volume, CPC, cleaning", 2, "auto", phase2.b07_volumes),
         Block("08", "Top-20 SERP + clusters", 2, "auto", phase2.b08_serp_clusters),
@@ -202,7 +202,8 @@ def run(slug, say=print, stop_at_gate=True):
             memo = b.run(Ctx(slug))
             store.set_block(slug, b.id, status="WAITING", summary=memo.summary)
             store.update_venture(slug, status=f"gate_{b.id}")
-            say(f"\n=== {b.name} ===\n{memo.summary}\n\nDecide: " + " | ".join(f"vm gate {slug} {d}" for d in b.decisions))
+            has_angle = bool(store.venture(slug)["data"].get("other_angle"))
+            say(f"\n=== {b.name} ===\n{memo.summary}\n\nDecide: " + " | ".join(f"vm gate {slug} {d}" for d in b.decisions if d != "angle" or has_angle))
             return f"gate_{b.id}"
         if not _run_block(b, slug, say):
             return store.venture(slug)["status"]
@@ -238,6 +239,8 @@ def gate(slug, decision, note=""):
         store.add_gate(slug, ",".join(stopped), "override", note)
         store.update_venture(slug, status="active")
         return f"override noted; blocks {', '.join(stopped)} cleared. Run: vm run {slug}"
+    if decision == "angle":
+        return try_angle(slug, note)
     if not v["status"].startswith("gate_"):
         raise SystemExit(f"{slug} is not waiting at a gate (status: {v['status']})")
     gid = v["status"].removeprefix("gate_")
@@ -262,6 +265,24 @@ def gate(slug, decision, note=""):
         return "GO: approved for phase 5 (build). Your manual list is in OWNER-TODO.json."
     store.update_venture(slug, status="active")
     return f"{decision.upper()} saved. Run: vm run {slug}"
+
+
+def try_angle(slug, note=""):
+    """Test the other angle from block 04 (or the owner's own words) as its own idea. The main idea is left as it is."""
+    v = store.venture(slug)
+    a = v["data"].get("other_angle") or {}
+    idea = (note or a.get("idea") or "").strip()
+    if not idea:
+        raise SystemExit(f"no other angle found for {slug} yet (it appears after step 04). Or write your own: vm gate {slug} angle \"...\"")
+    child = v["data"].get("angle_slug")
+    if child and store.venture(child) and store.venture(child)["idea"] == idea:
+        return f"the other angle is already saved as '{child}'. Run: vm run {child}"
+    child = new(idea, v["source"], v["country"], v["lang"], f"{slug}-angle", depth=v["data"].get("depth", "full"))
+    store.set_data(child, angle_of=slug, parent_score100=v["data"].get("first_score100"), parent_idea=v["one_liner"] or v["idea"])
+    store.set_data(slug, angle_slug=child)
+    store.add_gate(slug, v["status"].removeprefix("gate_") if v["status"].startswith("gate_") else "any", "angle", idea)
+    store.log(slug, "gate", f"ANGLE -> {child}: {idea}")
+    return f"other angle saved as its own idea '{child}'. Run: vm run {child}"
 
 
 def deepen(slug, depth="full"):

@@ -56,6 +56,11 @@ th{font-weight:600;color:%(MUTE)s;font-size:8pt;text-transform:none}tr{break-ins
 pre{white-space:pre-wrap;font:8.5pt/1.45 Consolas,ui-monospace,monospace;margin:0}
 .foot{font-size:8pt;color:%(MUTE)s;margin-top:14pt}
 .herogrid{display:grid;grid-template-columns:96pt 1fr;gap:16pt;align-items:center}
+.stages{display:flex;gap:8pt;margin:8pt 0 2pt}.stages>div{flex:1;border:1px solid #e4e4e7;border-radius:8pt;padding:7pt 10pt}
+.stages span{display:block;font-size:8pt;letter-spacing:.06em;text-transform:uppercase;color:#71717a}.stages b{font-size:15pt}
+.stages i{display:block;font-style:normal;font-size:8.5pt;color:#71717a}.stages .off b{color:#a1a1aa}
+.angle{border:1.5px solid #16a34a;background:#f0fdf4;border-radius:8pt;padding:9pt 12pt;margin:8pt 0}.angle .lbl{font-size:8pt;letter-spacing:.08em;color:#15803d;font-weight:700}
+.angle p{margin:3pt 0}
 .ring{width:92pt;height:92pt;border-radius:50%%;display:grid;place-items:center}
 .ring>div{width:74pt;height:74pt;border-radius:50%%;display:flex;align-items:center;justify-content:center;color:#fff}
 .ring b{font-size:26pt;line-height:1}.ring span{font-size:9pt;opacity:.85;margin-left:1pt}
@@ -84,7 +89,7 @@ GLOSSARY = [
     ("SERP", "The Google results page for a search."),
     ("Cluster", "A group of searches that Google answers with the same pages. One cluster = one page to build."),
     ("Buying intent", "A search from someone ready to pay (\"passport photo online\"), not just curious (\"what size is a passport photo\")."),
-    ("ICE score (1-10)", "Impact x Confidence x Ease, averaged. A quick gut-check of how worth it an idea is. 6+ is good."),
+    ("First-look score", "The phase 1 score: how big the win could be, how sure we are, and how easy it is, each out of 10, averaged and shown out of 100 (also called ICE). 60+ is good."),
     ("MVP", "Minimum viable product: the simplest version people can pay for."),
     ("CAC (customer acquisition cost)", "What it costs to win one paying customer (ads, emails, time)."),
     ("Max CAC", "The most you can spend to win a customer and still not lose money."),
@@ -274,6 +279,13 @@ def answer_of(v, data, n_done):
         if q.startswith("MAYBE"):
             return "MAYBE: FULL CHECK IF YOU LIKE IT", CARE, "Quick check score %s out of 100. Some basics are weak; only dig deeper if you really like the idea." % sc_
         return "SKIP IT", BAD, "Quick check score %s out of 100. The basics are weak." % sc_
+    fs = data.get("first_score100")
+    if st == "gate_05" and fs is not None:
+        if fs >= 60:
+            return "GOOD FIRST LOOK: RESEARCH IT", GOOD, "First-look score %d out of 100. Good enough to spend on real keyword research. The main score comes after that research." % fs
+        if (data.get("other_angle") or {}).get("idea"):
+            return "WEAK AS IT IS: TRY THE OTHER ANGLE", CARE, "First-look score %d out of 100 (60 or more is good). The idea as written is weak, but another angle could work. See the green box." % fs
+        return "WEAK: PROBABLY SKIP IT", BAD, "First-look score %d out of 100 (60 or more is good), and no better angle was found." % fs
     if st == "killed":
         return "DON'T BUILD IT", BAD, "You stopped this idea. It stays in the archive so it is never suggested again."
     if st == "kill_recommended":
@@ -291,6 +303,8 @@ def answer_of(v, data, n_done):
         return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %d out of 100. %s" % (round(num(data.get("gate3_score")) * 20), why)
     if rec.startswith("KILL"):
         return "DON'T BUILD IT", BAD, "It scored only %d out of 100 on the 7 checks that matter most." % round(num(data.get("gate3_score")) * 20)
+    if fs is not None:
+        return "NOT FINISHED YET", "#52525b", "First-look score %d out of 100. The machine has done %d of 18 steps; the main score comes when the research is done." % (fs, n_done)
     return "NOT FINISHED YET", "#52525b", "The machine has done %d of 18 steps so far. Run it again to continue." % n_done
 
 
@@ -353,6 +367,14 @@ def build_html(slug):
             scores, avg = gate3_scores(Ctx(slug)) if comps and mk and seo_ and clusters else (None, None)
     except Exception:
         scores, avg = None, None
+    first = False  # True = only the first-look (phase 1) score exists so far
+    if not scores and not quick and sc:
+        from .blocks.gates import first_scores, FIRST_QUESTIONS
+        scores, avg = first_scores(Ctx(slug))
+        QMAP, first = FIRST_QUESTIONS, bool(scores)
+    angle = data.get("other_angle") if (data.get("other_angle") or {}).get("idea") else None
+    kid = None
+    first100 = data.get("first_score100")
     score100 = int(round(avg / 5 * 100)) if avg else None
     aiv = jf("15_ai_visibility.json")
     uec = (ue or {}).get("chosen") or {}
@@ -364,7 +386,7 @@ def build_html(slug):
             continue
         summ = re.sub(r"\s*\|\s*OWNER OVERRIDE:.*$", "", st_.get("summary") or "")
         if bid == "04" and sc:
-            w = "The quick gut-check score is only %s out of 10 (6 or more is good)." % sc["ice_avg"]
+            w = "The first-look score is only %d out of 100 (60 or more is good)." % round(sc["ice_avg"] * 10)
         elif bid == "12" and mk:
             w = "The careful market guess (%s a year) is only %.1f times your first-year goal; we want 10 times or more." % (money(mk["bottom_up_usd_year"]), mk["bottom_up_usd_year"] / max(mk["year1_goal_usd"], 1))
         elif bid == "16" and uec.get("paid_search_cac") and uec["paid_search_cac"] > uec.get("max_cac", 0):
@@ -381,7 +403,21 @@ def build_html(slug):
         g = {"gate_05": ("#1", "GO starts the paid keyword research (about $0.50-1.50). KILL archives the idea."),
              "gate_14": ("#2", "GO goes on to costs and the plan. PIVOT narrows the idea (one country, businesses only, a smaller group) and redoes the research. KILL archives it."),
              "gate_18": ("#3", "GO approves building it. TEST runs a small capped test first. KILL archives it.")}[st]
-        nxt += ["Read the worries.", "Make decision %s in the app or with: vm gate %s go | kill%s" % (g[0], slug, " | pivot \"...\"" if st == "gate_14" else " | test" if st == "gate_18" else ""), g[1]]
+        kid = store.venture(data["angle_slug"]) if data.get("angle_slug") else None
+        if st == "gate_05" and kid and (first100 or 100) < 60:
+            ks = kid["data"].get("first_score100")
+            nxt += [("The other angle was tested as its own idea (%s): it scored %d out of 100 on its first look. Read its report next." % (kid["slug"], ks)) if ks is not None
+                    else "The other angle is saved as its own idea (%s). Run it: vm run %s" % (kid["slug"], kid["slug"]),
+                    "Stop this version: vm gate %s kill (it stays archived so it is never suggested again)." % slug,
+                    "Still believe in the idea as written? vm gate %s go starts the paid keyword research (about $0.50-1.50)." % slug]
+        elif st == "gate_05" and angle and (first100 or 100) < 60:
+            nxt += ["Test the other angle (about 1 cent, a few minutes): press 'Test the other angle' in the app, or: vm gate %s angle" % slug,
+                    "Or stop here: vm gate %s kill (it stays archived so it is never suggested again)." % slug,
+                    "Still believe in the idea as written? vm gate %s go starts the paid keyword research (about $0.50-1.50)." % slug]
+        else:
+            nxt += ["Read the worries.", "Make decision %s in the app or with: vm gate %s go | kill%s" % (g[0], slug, " | pivot \"...\"" if st == "gate_14" else " | test" if st == "gate_18" else ""), g[1]]
+            if st == "gate_05" and angle:
+                nxt.append("There is also another angle you can test for about 1 cent: vm gate %s angle" % slug)
         if st == "gate_18" and costs and costs.get("owner_questions"):
             nxt += ["Answer this first: " + first_sentence(q, 200) for q in costs["owner_questions"][:3]]
     elif st == "approved_build" and costs:
@@ -389,6 +425,8 @@ def build_html(slug):
     elif st == "quick_test" and tf("20_quick_test.md"):
         nxt.append("Run the quick test described in 'The plan'. Stop the moment the kill line is hit.")
     elif st == "light_done":
+        if angle and num(data.get("quick_score100"), 100) < 55:
+            nxt.append("Weak as written, but another angle could work. Test it (about 20 cents): vm gate %s angle" % slug)
         nxt += ["If the quick score is good, run the full check: vm deepen %s full (about $2-3 more), or in the app press 'Run full check'." % slug,
                 "Want everything bigger (more searches, countries, AI questions)? vm deepen %s deep (about $4-7)." % slug,
                 "Not convinced? vm gate %s kill (it stays archived so it is never suggested again)." % slug]
@@ -408,6 +446,11 @@ def build_html(slug):
         top_cpc = max(num(k["cpc"]) for k in buy)
         glance.append(("Demand", "{:,} searches a month from people ready to buy".format(buy_vol), *verdict(buy_vol >= 1000, buy_vol >= 300)))
         glance.append(("Buyer value", "advertisers pay up to %s per click" % money(top_cpc), *verdict(top_cpc >= 2, top_cpc >= 1)))
+    if how and not biz:
+        priced = [x_ for x_ in how.get("competitors", []) if x_.get("price") and "unknown" not in x_["price"].lower()]
+        free_ = sum(1 for x_ in priced if "free" in x_["price"].lower())
+        glance.append(("People already pay", "%d sites already sell this%s" % (len(priced), ("; %d of them also give a lot away free" % free_) if free_ else ""),
+                       *verdict(len(priced) >= 3 and free_ < len(priced) / 2, len(priced) >= 1)))
     if pulse:
         ch = pulse.get("change_24m_pct_best")
         if pulse["status"] == "dying":
@@ -468,16 +511,34 @@ def build_html(slug):
     H.append("<h1>%s</h1>" % e(v["one_liner"] or v["idea"]))
     H.append("<p class=mute>Checked for: %s &middot; Steps done: %d of 18 &middot; Data bought: %s</p>"
              % (e(v["country"].upper()), n_done, money(store.spent(slug))))
+    if data.get("angle_of"):
+        H.append("<p class=small><b>This is the other angle</b> of the idea \"%s\", which scored %s out of 100 on its first look.</p>"
+                 % (e(first_sentence(data.get("parent_idea") or data["angle_of"], 200)), e(data.get("parent_score100", "?"))))
     ring = ("<div class=ring style='background:conic-gradient(#fff %d%%, rgba(255,255,255,.3) 0)'><div style='background:%s'><b>%d</b><span>/100</span></div></div>"
             % (score100, color, score100) if score100 is not None else
             "<div class=ring style='background:rgba(255,255,255,.3)'><div style='background:%s'><b>?</b><span>/100</span></div></div>" % color)
     H.append("<div class=hero style='background:%s'><div class=herogrid>%s<div><div class=lbl>THE ANSWER</div><div class=ans>%s</div><p>%s</p></div></div></div>"
              % (color, ring, e(ans), e(why)))
+    stage = [("First look", "3 checks, about 1 cent", first100 is not None, first100),
+             ("Main score", "7 checks, after the full research", bool(scores) and not first and not quick, score100 if (scores and not first and not quick) else None)]
+    if not quick and first100 is not None:
+        H.append("<div class=stages>" + "".join(
+            "<div class='%s'><span>%s</span><b>%s</b><i>%s</i></div>" % ("on" if done_ else "off", e(n_), ("%d/100" % val_) if val_ is not None else "not yet", e(sub_))
+            for n_, sub_, done_, val_ in stage) + "</div>")
+    if angle and (first or quick) and st in ("gate_05", "light_done", "kill_recommended"):
+        H.append("<div class=angle><div class=lbl>ANOTHER ANGLE THAT COULD WORK</div><p><b>%s</b></p><p>%s</p><p class=small><b>Cheapest test:</b> %s</p>"
+                 "<p class=small>%s</p></div>"
+                 % (e(angle["idea"]), e(angle.get("why", "")), e(angle.get("cheapest_test", "")),
+                    ("This angle was tested as its own idea (<b>%s</b>)%s." % (e(data["angle_slug"]),
+                     (": it scored <b>%d out of 100</b> on its first look" % kid["data"]["first_score100"]) if kid and kid["data"].get("first_score100") is not None else "")) if data.get("angle_slug") else
+                    ("The machine can run a first look on this angle as its own idea. In the app press <b>Test the other angle</b>, or type: <b>vm gate %s angle</b>" % e(slug))))
     if scores:
         H.append("<h3>The %d scores (out of 10)</h3><div class=mini>" % len(scores) + "".join(
             "<div><span class=q>%s</span><span class=bar><i style='width:%d%%;background:%s'></i></span><b>%d</b></div>"
-            % (e(QMAP.get(k, k)), val * 20, GOOD if val >= 4 else CARE if val == 3 else BAD, val * 2) for k, (val, _w) in scores.items()) + "</div>"
-            + ("<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
+            % (e(QMAP.get(k, k)), val * 20, GOOD if val >= 4 else CARE if val >= 3 else BAD, val * 2) for k, (val, _w) in scores.items()) + "</div>"
+            + ("<p class='small mute'>First-look score = the average of the 3, out of 100. Under 60: weak as written. 60 or more: worth the paid research. "
+               "This is an early judgement from what the AI found on the web, before any Google numbers. The main score (7 checks) replaces it after the full research.</p>" if first else
+               "<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
                "A quick check does not look at rivals, AI assistants, market size or money yet.</p>" if quick else
                "<p class='small mute'>Overall score = the average of the 7, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build, unless the likely first-year sales are below your goal (then: test first).</p>"))
     if glance:
@@ -499,16 +560,19 @@ def build_html(slug):
     # ================= PART 1: SCORECARD IN DETAIL =================
     sec[0] += 1
     H.append("<span class=num>PART 1</span><h2>The scorecard in detail</h2><p class=mute>The %s things that decide if this idea is worth %s, each out of 10.</p>"
-             % ("6" if quick else "7", "a deeper look" if quick else "building"))
+             % ("3" if first else "6" if quick else "7", "paying for real research" if first else "a deeper look" if quick else "building"))
     if scores:
-        H.append(plain(("Quick score <b>%d out of 100</b>. Under 55 means skip it. 55 to 69 means maybe. 70 or more means it is worth a full check." if quick else
+        H.append(plain(("First-look score <b>%d out of 100</b>. Under 60 means the idea is weak as written. 60 or more means it is worth the paid research. The main score comes later." if first else
+                        "Quick score <b>%d out of 100</b>. Under 55 means skip it. 55 to 69 means maybe. 70 or more means it is worth a full check." if quick else
                         "Overall <b>%d out of 100</b>. Under 60 means don't build. 60 to 69 means run a cheap test first. 70 or more means build.") % score100))
         for k, (val, why_) in scores.items():
-            col = GOOD if val >= 4 else CARE if val == 3 else BAD
+            col = GOOD if val >= 4 else CARE if val >= 3 else BAD
             H.append("<div class=score><div class=q>%s</div><div class=bar><i style='width:%d%%;background:%s'></i></div><div><b>%d</b>/10</div><div class=why>%s</div></div>"
                      % (e(QMAP.get(k, k)), val * 20, col, val * 2, e(why_)))
     else:
         H.append(plain("The scores appear once all research steps are done (step 18). So far %d of 18 steps are done." % n_done))
+    if scores and not first and not quick and first100 is not None:
+        H.append("<p class=small>For comparison: the first-look score, before any research, was <b>%d out of 100</b>.</p>" % first100)
     H.append("<h3>All the worries</h3>")
     H.append("<div class=worry>%s</div>" % bullets(worries) if worries else "<p>Nothing serious was flagged.</p>")
     H.append("<h3>All next steps</h3><ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in nxt) + "</ol>")

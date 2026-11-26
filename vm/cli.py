@@ -26,6 +26,8 @@ def cmd_gate(a):
     print(pipeline.gate(a.slug, a.decision, " ".join(a.note)))
     report.write(a.slug)
     pdf.write(a.slug)
+    if a.decision == "angle":  # the other angle is its own idea: run its first look right away (about 1 cent)
+        cmd_run(argparse.Namespace(slug=store.venture(a.slug)["data"]["angle_slug"]))
 
 
 def cmd_list(a):
@@ -117,9 +119,9 @@ def main(argv=None):
     s = sub.add_parser("run", help="run blocks until the next owner gate")
     s.add_argument("slug")
     s.set_defaults(f=cmd_run)
-    s = sub.add_parser("gate", help="owner decision: go | kill | pivot | test | override")
+    s = sub.add_parser("gate", help="owner decision: go | kill | angle | pivot | test | override")
     s.add_argument("slug")
-    s.add_argument("decision", choices=["go", "kill", "pivot", "test", "override"])
+    s.add_argument("decision", choices=["go", "kill", "angle", "pivot", "test", "override"])
     s.add_argument("note", nargs="*")
     s.set_defaults(f=cmd_gate)
     sub.add_parser("list", help="all ventures").set_defaults(f=cmd_list)

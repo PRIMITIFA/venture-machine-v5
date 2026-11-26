@@ -28,8 +28,10 @@ def b01_intake(c):
     if v["source"].startswith("http"):
         p = web.fetch(v["source"])
         src_text = web.text_of(p["html"], 6000) if p["status"] == 200 else f"(could not open: {p['status']} {p['error']})"
+    # an "other angle" idea is never a duplicate of the idea it came from
+    family = {c.slug, v["data"].get("angle_of"), v["data"].get("angle_slug")}
     archive = [{"slug": o["slug"], "one_liner": o["one_liner"] or o["idea"], "status": o["status"]}
-               for o in store.ventures() if o["slug"] != c.slug]
+               for o in store.ventures() if o["slug"] not in family]
     # cheap local duplicate check first
     for o in archive:
         r = difflib.SequenceMatcher(None, v["idea"].lower(), o["one_liner"].lower()).ratio()
@@ -224,6 +226,16 @@ class Ice(BaseModel):
     impact: int = Field(ge=1, le=10)
     confidence: int = Field(ge=1, le=10)
     ease: int = Field(ge=1, le=10)
+    impact_why: str = Field(default="", description="one short plain sentence: why this impact score")
+    confidence_why: str = Field(default="", description="one short plain sentence: why this confidence score")
+    ease_why: str = Field(default="", description="one short plain sentence: why this ease score")
+
+
+class OtherAngle(BaseModel):
+    idea: str = Field(description="One full sentence that stands alone as a NEW idea: who pays, what they get, how it is charged. "
+                                  "A clearly different customer or offer (B2B instead of consumers, a narrower group, another way to charge), not a small tweak")
+    why: str = Field(description="one or two plain sentences: why this could work where the idea as written is weak")
+    cheapest_test: str = Field(description="the cheapest way to check it before building, one sentence")
 
 
 class Scorecard(BaseModel):
@@ -236,6 +248,8 @@ class Scorecard(BaseModel):
     blockers: list[str] = Field(description="HARD blockers only: things that make the business impossible (illegal, no way to get the data, needs a licence we cannot get). Empty if none. Prerequisites and risks go in 'risks'")
     risks: list[str] = Field(default=[], description="soft risks and prerequisites (privacy policy, unproven conversion, low price...)")
     summary_3_lines: list[str] = Field(min_length=3, max_length=3)
+    other_angle: Optional[OtherAngle] = Field(default=None, description="the ONE best different angle on this idea that could work better than the idea as written. "
+                                              "Always give one when the ICE average is under 6; null only if there truly is none")
 
 
 def b04_ice(c):
@@ -244,15 +258,20 @@ def b04_ice(c):
     out = ai.ask_json(
         f"""Block 04. Score this idea. Give exactly 5 arguments FOR and 5 AGAINST, the single biggest unknown, the effort
 (days to a working MVP built with an AI coding agent, monthly running cost, API dependencies, owner hours/week),
-ICE 1-10 (Impact, Confidence, Ease), synergy with the owner's existing assets, hard blockers, and a 3-line summary.{c.note()}""",
+ICE 1-10 (Impact, Confidence, Ease) with one short plain reason each, synergy with the owner's existing assets, hard blockers,
+and a 3-line summary. Also name the ONE other angle that could work better (a different customer, B2B, a narrower group or another
+way to charge), written as a full new idea sentence, so it can be tested on its own if this idea scores under 6.
+In the summary and reasons use plain words; never write "ICE" or score shorthand like "3/2/4".{c.note()}""",
         Scorecard, smart=True, context=ctx)
     avg = round((out.ice.impact + out.ice.confidence + out.ice.ease) / 3, 2)
     d = out.model_dump() | {"ice_avg": avg}
     c.write("05_scorecard.json", d)
-    store.set_data(c.slug, ice_avg=avg, mvp_days=out.effort.days_to_mvp)
+    store.set_data(c.slug, ice_avg=avg, mvp_days=out.effort.days_to_mvp, first_score100=round(avg * 10),
+                   other_angle=out.other_angle.model_dump() if out.other_angle else None)
     summary = f"ICE {avg} (I{out.ice.impact} C{out.ice.confidence} E{out.ice.ease}); MVP {out.effort.days_to_mvp} d; blockers: {', '.join(out.blockers) or 'none'}"
     if out.blockers or out.effort.days_to_mvp > 30:
         return Result("kill", summary)
     if avg >= 6.0 and out.effort.days_to_mvp <= 14:
         return Result("pass", summary)
-    return Result("warn", summary + " (below the pass bar: ICE >= 6 and MVP <= 14 d)")
+    return Result("warn", summary + " (below the pass bar: ICE >= 6 and MVP <= 14 d)"
+                  + ("; another angle could work, see gate 1" if out.other_angle else ""))
