@@ -328,11 +328,11 @@ class Pure(unittest.TestCase):
         class C:  # the smallest context knockouts() needs
             def __init__(self, bottom_up):
                 self.v = {"data": {}}
-                self.mk = {"bottom_up_usd_year": bottom_up, "year1_goal_usd": 12000}
+                self.mk = {"bottom_up_usd_year": bottom_up, "min_market_usd": 12000}
 
             def read(self, name, default=None):
                 return self.mk
-        self.assertEqual(gates.knockouts(C(11999))[0], "KILL")                    # under 1x the goal: don't build
+        self.assertEqual(gates.knockouts(C(11999))[0], "KILL")                    # under the smallest size: don't build
         self.assertTrue(gates.knockouts(C(12001))[0].startswith("QUICK TEST"))   # 1x-3x: test at most
         self.assertTrue(gates.knockouts(C(35999))[0].startswith("QUICK TEST"))
         self.assertIsNone(gates.knockouts(C(36001))[0])

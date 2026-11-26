@@ -84,8 +84,9 @@ class Settings:
         return int(_f("VM_SERP_DEPTH", 20))
 
     @property
-    def year1_goal_usd(self):
-        return _f("VM_YEAR1_GOAL_USD", 12000)
+    def min_market_usd(self):
+        """Smallest search market (USD a year) worth building for. A size bar of the machine, not anybody's sales goal."""
+        return _f("VM_MIN_MARKET_USD", 12000)
 
     @property
     def assumed_conversion(self):

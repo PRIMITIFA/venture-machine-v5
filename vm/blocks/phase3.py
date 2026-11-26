@@ -231,7 +231,7 @@ def b12_market(c):
         seen += [p for x in c.read("02_how_analysis.json")["competitors"] for p in parse_prices(x["price"])]
         price, price_src = median(seen), f"median of {len(seen)} competitor prices seen in blocks 02/11"
     bottom_up = clicks * conv * price * 12
-    goal = S.year1_goal_usd
+    goal = S.min_market_usd  # size bar, not a sales goal
     d = {"bottom_up_usd_year": round(bottom_up),
          "bottom_up_method": (f"{int(bv)} buying searches/mo (a rival's bare brand name counts 10%) x top-5 CTR {CTR_TOP5:.0%} x {aio_factor} "
                               f"(Google shows its own AI answer on {aio_share:.0%} of these searches) = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) "
@@ -240,25 +240,25 @@ def b12_market(c):
          "price_used_usd": price, "price_source": price_src,
          "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_traffic_history": history,
          "rivals_traffic_trend_12m_pct": rivals_trend,
-         "search_volume_by_country": by_country, "year1_goal_usd": goal, **out.model_dump()}
+         "search_volume_by_country": by_country, "min_market_usd": goal, **out.model_dump()}
     d["typical_price_usd"] = price
     big, small = max(bottom_up, out.top_down_usd_year), min(bottom_up, out.top_down_usd_year)
     d["methods_differ_10x"] = bool(small and big / small > 10)
     c.write("14_market_analysis.json", d)
-    summary = (f"bottom-up ${bottom_up:,.0f}/yr, top-down ${out.top_down_usd_year:,.0f}/yr vs goal ${goal:,.0f}; "
+    summary = (f"bottom-up ${bottom_up:,.0f}/yr, top-down ${out.top_down_usd_year:,.0f}/yr (smallest worth building: ${goal:,.0f}/yr); "
                f"underserved: {', '.join(out.underserved_countries_or_segments[:3])[:300] or 'none'}")
     if not price:
         return Result("warn", summary + "; no competitor price found, market size unknown: check prices by hand at gate 2")
     if big < goal:
-        return Result("kill", summary + "; the whole market is smaller than the year-1 goal")
+        return Result("kill", summary + "; the whole market is too small to build for")
     if bottom_up < goal:
-        return Result("warn", summary + f"; the money reachable through Google search (${bottom_up:,.0f}) is below the year-1 goal: "
+        return Result("warn", summary + f"; the money reachable through Google search (${bottom_up:,.0f}) is too small to build for: "
                                         "as a search business this is a KILL at gate 3 unless another channel carries it")
     if rivals_trend is not None and rivals_trend < -30:
         summary += f"; direct rivals' Google visits fell {abs(rivals_trend):.0f}% in 12 months (shrinking)"
     if bottom_up >= 10 * goal and out.underserved_countries_or_segments:
         return Result("warn" if d["methods_differ_10x"] else "pass", summary + ("; methods differ >10x (flag in SWOT)" if d["methods_differ_10x"] else ""))
-    return Result("warn", summary + "; below the bar (bottom-up >= 10x goal AND an underserved segment)")
+    return Result("warn", summary + "; below the bar (search market 10x the smallest size AND an underserved segment)")
 
 
 # ---------------- 13 SEO + link gap + AI visibility ----------------

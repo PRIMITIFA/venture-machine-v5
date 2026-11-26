@@ -242,11 +242,11 @@ swap the keyword in a template are not allowed.
 3) One link-bait asset and the AI-search plan. 4) Rate our edge 1-5 and give the reason as facts (price, data, speed, channel), not opinion.
 RULES: use the chosen price from the business case everywhere, in one currency. One main keyword belongs to ONE page only; a page
 without its own cluster must say "support page, no target keyword" as its data source and does not count toward the 20.
-The forecast must be reachable from the search market in the context; if that market is below the first-year goal, say that search
-alone will not reach the goal and make the first product-line item the cheapest validation test (pre-sale or cold email) before any page is built.
+The forecast must be reachable from the search market in the context; if that market is below min_market_usd, say that search
+alone is too small to carry the business and make the first product-line item the cheapest validation test (pre-sale or cold email) before any page is built.
 Never give away free the same data the paid product sells.{c.note()}""",
         Plan, smart=True, context={"clusters": cl_info, "business_case": c.read("18_business_case.md"),
-                                   "search_market": {k: c.read("14_market_analysis.json").get(k) for k in ("bottom_up_usd_year", "bottom_up_at_chosen_price_usd_year", "buying_searches_month", "year1_goal_usd")},
+                                   "search_market": {k: c.read("14_market_analysis.json").get(k) for k in ("bottom_up_usd_year", "bottom_up_at_chosen_price_usd_year", "buying_searches_month")} | {"min_market_usd": S.min_market_usd},
                                    "chosen_price_usd": c.v["data"].get("chosen_price_usd"),
                                    "eeat": c.read("03_eeat_quality.json"), "gap": c.read("13_competitor_business.json").get("identified_gap"),
                                    "ux_weaknesses": [x.get("weaknesses") for x in c.read("12_competitor_ux.json")["competitors"]],

@@ -70,7 +70,7 @@ def memo2(c):
         prices.append(f"{x['domain']}: " + (", ".join(f"{p['name'][:60]} {p['price']}" for p in known[:3]) or "no price found (check by hand)"))
     lines = ["Competitor prices:"] + [f"  - {p}" for p in prices] + [
         f"Gap: {biz['identified_gap']}",
-        f"Market: bottom-up ${mk['bottom_up_usd_year']:,.0f}/yr, top-down ${mk['top_down_usd_year']:,.0f}/yr (goal ${mk['year1_goal_usd']:,.0f})",
+        f"Market: bottom-up ${mk['bottom_up_usd_year']:,.0f}/yr, top-down ${mk['top_down_usd_year']:,.0f}/yr (smallest worth building: ${S.min_market_usd:,.0f}/yr)",
         "SEO strength: " + ", ".join(f"{s['domain']} DR {s['dr']} / {s['referring_domains']} RD" for s in seo_["competitors"]),
         "Underserved:"] + [f"  - {u[:220]}" for u in mk["underserved_countries_or_segments"][:4]]
     if ux.get("manual_review_at_gate2"):
@@ -89,7 +89,7 @@ def gate3_scores(c):
     max_cpc = max([num(k["cpc"]) for k in buy] or [0])
     mk = c.read("14_market_analysis.json")
     bottom_up = market_at_chosen_price(c, mk)
-    ratio = bottom_up / max(mk["year1_goal_usd"], 1)
+    ratio = bottom_up / max(S.min_market_usd, 1)
     short = read_csv(c.path("11_shortlist.csv"))
     easy = sum(1 for r in short if r["kd"] != "" and num(r["kd"]) <= 20) / max(len(short), 1)
     seo_ = c.read("15_competitor_seo.json")
@@ -100,7 +100,7 @@ def gate3_scores(c):
     ads_seen = sum(num((cl.get("features") or {}).get("paid")) for cl in clusters) + num((c.read("04_niche_pulse.json", default={}) or {}).get("ads_on_top_term"))
     caps = c.v["data"].get("budget_caps", {})
     fixed = caps.get("fixed_cost_usd_month", 0)
-    cost_share = fixed / max(mk["year1_goal_usd"] / 12, 1)
+    cost_share = fixed / max(S.min_market_usd / 12, 1)  # fixed dollar bands: $50 / $100 / $200 / $400 a month at the default
 
     def band(v, cuts):  # cuts for 5,4,3,2
         for s, cut in zip((5, 4, 3, 2), cuts):
@@ -122,12 +122,12 @@ def gate3_scores(c):
         "demand": (band(buy_vol, (5000, 2000, 1000, 300)),
                    f"{int(buy_vol):,} buying searches a month (want 1,000+): {sp['commercial']:,} commercial, plus 10% of {sp['brand']:,} searches for a rival's name; {sp['info']:,} learning searches not counted"),
         "value": (value, value_note),
-        "market": (band(ratio, (50, 20, 10, 3)), f"the money reachable through Google search is {ratio:.1f}x your first-year goal (want 10x+)"),
+        "market": (band(ratio, (50, 20, 10, 3)), f"about ${bottom_up / 12:,.0f} a month is reachable through Google search. We want ${S.min_market_usd * 10 / 12:,.0f}+ a month, and under ${S.min_market_usd / 12:,.0f} is too small"),
         "kd_dr": (min(kd_dr, rank_cap), f"{easy:.0%} of the best searches are easy to rank for; weakest direct rival has strength {min_dr:.0f}/100.{kd_note}"),
         "weak_spots": (weak_s, f"rivals are weak on {weak:.0%} of the page topics"),
         "advantage": (int(c.v["data"].get("advantage_score") or 3), adv_reason[:200] or "how much better we can be than the rivals (AI judgement)"),
         "costs": (5 if cost_share <= 0.05 else 4 if cost_share <= 0.10 else 3 if cost_share <= 0.20 else 2 if cost_share <= 0.40 else 1,
-                  f"about ${fixed:.0f} a month to run, {cost_share:.0%} of your monthly goal"),
+                  f"about ${fixed:.0f} a month to run (want under ${S.min_market_usd / 12 * 0.05:,.0f} a month)"),
     }
     # geometric mean: one very low score pulls the whole result down instead of hiding behind the high ones
     prod = 1.0
@@ -149,25 +149,27 @@ def market_at_chosen_price(c, mk):
 def knockouts(c):
     """Rules that decide on their own, whatever the average says. Returns (forced recommendation or None, note)."""
     mk = c.read("14_market_analysis.json")
-    goal = max(mk["year1_goal_usd"], 1)
-    ratio = market_at_chosen_price(c, mk) / goal
-    if ratio < 1:
-        return "KILL", (f"Knock-out: the money reachable through Google search (${ratio * goal:,.0f} a year) is smaller than your first-year goal "
-                        f"(${goal:,.0f}). As a search business this is a KILL. Only another channel (for example cold email) could carry it; test that as its own idea.")
-    if ratio < 3:
-        return "QUICK TEST (7 days, capped)", f"Capped at TEST: the money reachable through Google search is only {ratio:.1f}x your first-year goal (want 10x)."
+    floor = max(S.min_market_usd, 1)
+    market = market_at_chosen_price(c, mk)
+    if market < floor:
+        return "KILL", (f"Knock-out: only about ${market / 12:,.0f} a month (${market:,.0f} a year) is reachable through Google search, even if you took all of it. "
+                        f"Under ${floor / 12:,.0f} a month is too small to build for. As a search business this is a KILL. "
+                        "Only another channel (for example cold email) could carry it; test that as its own idea.")
+    if market < 3 * floor:
+        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${market / 12:,.0f} a month is reachable through Google search "
+                                               f"(want ${floor * 10 / 12:,.0f}+ a month).")
     return None, ""
 
 
 def memo3(c):
     s, avg = gate3_scores(c)
     rec = "KILL" if avg < 3.0 else "QUICK TEST (7 days, capped)" if avg < 3.5 else "FULL BUILD"
-    # safety rule: good scores but a forecast below the first-year goal is not a full build
+    # safety rule: good scores but a forecast below the smallest size worth building is not a full build
     fc = (c.v["data"].get("forecast_12m_usd") or {}).get("mid")
     cap_note = ""
-    if rec == "FULL BUILD" and fc is not None and fc < S.year1_goal_usd:
+    if rec == "FULL BUILD" and fc is not None and fc < S.min_market_usd:
         rec = "QUICK TEST (7 days, capped)"
-        cap_note = f"Capped at TEST: the likely first-year sales (${fc:,.0f}) are below your goal (${S.year1_goal_usd:,.0f})."
+        cap_note = f"Capped at TEST: the likely first-year sales (${fc:,.0f}) are about ${fc / 12:,.0f} a month, under the ${S.min_market_usd / 12:,.0f} a month that makes a full build worth it."
     forced, ko = knockouts(c)
     if forced == "KILL" or (forced and rec == "FULL BUILD"):
         rec, cap_note = forced, ko

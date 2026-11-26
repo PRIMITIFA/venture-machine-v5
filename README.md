@@ -48,7 +48,7 @@ A plain-language report anyone can read:
   - one line on every topic, tagged good / careful / problem
   - the top worries and what to do next
 
-  If the likely first-year sales are below your goal, the answer is capped at "test it cheaply first", even with a high score. Everything after page 1 is the detail.
+  If the likely first-year sales are under $1,000 a month, the answer is capped at "test it cheaply first", even with a high score. Everything after page 1 is the detail.
 - **Is there demand?** Real Google searches, how hard each one is to rank for, and whether interest is growing.
 - **How hard is it to get onto Google, and how do you do it?** Each important search is rated Easy / Doable / Hard / Very hard, from three signals:
   - keyword difficulty
@@ -151,7 +151,7 @@ The state (blocks, gate decisions, the money ledger and the cache) is kept in `d
 |---|---|---|
 | **1** | after the idea filter | A **first-look score** out of 100 (3 checks out of 10: how much money, how sure, how easy; 60 or more is good). **GO** (start the paid keyword research) / **ANGLE** (the idea is weak as written, so test the other angle the machine found as its own idea, about 1 cent) / **KILL** (archived, never re-pitched) |
 | **2** | after the competitor and market research | **GO** / **PIVOT** (narrow to one country, B2B or a smaller segment; phases 2-3 re-run on it) / **KILL** |
-| **3** | after the plan | 7 checks, each scored out of 10, plus an overall score out of 100 (combined so one very low score pulls it down): under 60 is a KILL; 60-69 is a **QUICK TEST** (7 days, max $150, thresholds written first); 70 or more is **GO** to build. Knock-out: if the money reachable through Google search is below the first-year goal, it is a KILL as a search business whatever the score |
+| **3** | after the plan | 7 checks, each scored out of 10, plus an overall score out of 100 (combined so one very low score pulls it down): under 60 is a KILL; 60-69 is a **QUICK TEST** (7 days, max $150, thresholds written first); 70 or more is **GO** to build. Knock-out: if the money reachable through Google search is under about $1,000 a month, it is a KILL as a search business whatever the score |
 
 Every block has its own pass/kill test from the spec, for example:
 - 02: a competitor must already be charging money.
@@ -167,7 +167,7 @@ All settings live in `.env` (see `.env.example`):
 - caps
 - models (default: `claude-sonnet-5-5` for research, `claude-haiku-5-5` for labelling)
 - the number of SERPs (default 60), SERP depth (20)
-- the year-1 revenue goal used by block 12 ($12,000)
+- the smallest search market worth building for ($12,000 a year, about $1,000 a month). The machine uses no sales goals; it only checks that the market is big enough
 - the assumed conversion rate (1%, labelled as an assumption in every output)
 - the countries to compare
 

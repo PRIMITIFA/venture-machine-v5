@@ -400,7 +400,7 @@ def build_html(slug):
         elif bid == "04" and sc:
             w = "The first-look score is only %d out of 100 (60 or more is good)." % round(sc["ice_avg"] * 10)
         elif bid == "12" and mk:
-            w = "The money reachable through Google search (%s a year) is only %.1f times your first-year goal; we want 10 times or more." % (money(mk_up), mk_up / max(mk["year1_goal_usd"], 1))
+            w = "Only about %s a month is reachable through Google search; we want %s a month or more." % (money(round(mk_up / 12)), money(S.min_market_usd * 10 / 12))
         elif bid == "16" and uec.get("paid_search_cac") and uec["paid_search_cac"] > uec.get("max_cac", 0):
             w = "Paid ads would lose money: one customer from Google ads costs about %s, but you keep only %s per sale. Use free channels (Google search results, email)." % (money(uec["paid_search_cac"]), money(uec["net_per_sale"]))
         else:
@@ -514,16 +514,16 @@ def build_html(slug):
             glance.append(("Rivals", "the weakest direct rival has strength %d/100%s%s" % (min(drs), extra, ("; gap: " + first_sentence(biz["identified_gap"], 100)) if biz else ""),
                            *verdict(min(drs) < 40, min(drs) < 60)))
     if mk:
-        x_ = mk_up / max(mk["year1_goal_usd"], 1)
-        glance.append(("Market size", "about %s a year reachable through Google search, %.1fx your first-year goal" % (money(mk_up), x_), *verdict(x_ >= 10, x_ >= 3)))
+        x_ = mk_up / max(S.min_market_usd, 1)
+        glance.append(("Market size", "about %s a month (%s a year) reachable through Google search" % (money(round(mk_up / 12)), money(mk_up)), *verdict(x_ >= 10, x_ >= 3)))
     if uec:
         ads_ok = uec.get("paid_search_cac") is not None and uec["paid_search_cac"] <= uec.get("max_cac", 0)
         glance.append(("Money", "you keep %s per sale; Google ads %s" % (money(uec["net_per_sale"]), "can pay off" if ads_ok else "would lose money"),
                        *verdict(uec["net_per_sale"] > 0 and ads_ok, uec["net_per_sale"] > 0)))
     fc = data.get("forecast_12m_usd") or {}
     if fc.get("mid") is not None:
-        goal_ = S.year1_goal_usd
-        glance.append(("First-year sales", "likely %s (bad case %s, good case %s); your goal is %s" % (money(fc.get("mid")), money(fc.get("low")), money(fc.get("high")), money(goal_)),
+        goal_ = S.min_market_usd
+        glance.append(("First-year sales", "likely %s, about %s a month (bad case %s, good case %s)" % (money(fc.get("mid")), money(round(fc["mid"] / 12)), money(fc.get("low")), money(fc.get("high"))),
                        *verdict(fc["mid"] >= goal_, fc.get("high", 0) >= goal_)))
     if eeat:
         oks = sum(1 for k in ("real_person_or_company", "expertise_proof", "unique_data_per_page", "contacts_policies_real_example") if eeat[k]["ok"])
@@ -570,7 +570,7 @@ def build_html(slug):
                "<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
                "A quick check does not look at rivals, AI assistants, market size or money yet.</p>" if quick else
                "<p class='small mute'>Overall score = the 7 combined so that one very low score pulls the whole result down, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build. "
-               "Two rules decide on their own: if the money reachable through Google search is below your first-year goal the answer is don't build, and if the likely first-year sales are below your goal the most it can get is test first.</p>"))
+               "Two rules decide on their own: if less than %s a month is reachable through Google search the answer is don't build, and if the likely first-year sales are under that the most it can get is test first.</p>" % money(S.min_market_usd / 12)))
     if glance:
         H.append("<h3>Everything at a glance</h3><table class=glance>" + "".join(
             "<tr><td class=t>%s</td><td>%s</td><td class=n>%s</td></tr>" % (e(t), e(f), pill(w, c)) for t, f, w, c in glance) + "</table>")
@@ -579,7 +579,7 @@ def build_html(slug):
         three = ["Main score %d out of 100. %s" % (score100, why),
                  "Strongest point: %s %s. Weakest point: %s %s." % (QMAP.get(best_k, best_k), first_sentence(scores[best_k][1], 140).rstrip("."), QMAP.get(worst_k, worst_k), first_sentence(scores[worst_k][1], 140).rstrip("."))]
         if fc_mid is not None:
-            three.append("Likely first-year sales: %s, against a goal of %s." % (money(fc_mid), money(S.year1_goal_usd)))
+            three.append("Likely first-year sales: %s, about %s a month." % (money(fc_mid), money(round(fc_mid / 12))))
         H.append("<h3>In three sentences</h3>" + bullets(three))
     elif sc:
         H.append("<h3>In three sentences%s</h3>" % (" (from the first look)" if kws else "") + bullets(sc["summary_3_lines"]))
@@ -791,13 +791,12 @@ def build_html(slug):
     # ================= PART 4: MARKET =================
     if mk:
         section("How big is the money?", "Two different ways to guess how much money is in this market.")
-        goal = mk["year1_goal_usd"]
-        x = mk_up / max(goal, 1)
+        goal = S.min_market_usd
         H.append(plain("<b>Reachable through Google search: %s a year.</b> That is roughly what the top sites can earn from these searches if about 1 in 100 visitors buys%s. "
                        "It covers Google search only; other channels (cold email, communities) are not in it. "
                        "<b>Big-picture guess: %s a year</b> for the whole industry; you will only ever get a small slice of that. "
-                       "Your first-year goal is %s, and the search number is <b>%.1f times</b> that (we want at least 10 times; under 1 time means don't build it as a search business)."
-                       % (money(mk_up), (" at the chosen price of %s" % money(mk["chosen_price_usd"])) if mk.get("chosen_price_usd") else "", money(mk["top_down_usd_year"]), money(goal), x)))
+                       "The search number is about <b>%s a month</b>. We want %s a month or more; under %s a month is too small to build as a search business."
+                       % (money(mk_up), (" at the chosen price of %s" % money(mk["chosen_price_usd"])) if mk.get("chosen_price_usd") else "", money(mk["top_down_usd_year"]), money(round(mk_up / 12)), money(goal * 10 / 12), money(goal / 12))))
         H.append("<div class=two><div class=card><h4>How the search number works</h4><p class=small>%s</p></div><div class=card><h4>How the big-picture guess works</h4><p class=small>%s</p></div></div>"
                  % (e(mk["bottom_up_method"]), e(first_sentence(mk["top_down_method"], 400))))
         rows = [{"c": k.upper(), "s": ("{:,}".format(val) if isinstance(val, int) else val)} for k, val in mk.get("search_volume_by_country", {}).items()]
@@ -834,7 +833,7 @@ def build_html(slug):
         if costs:
             H.append("<p><b>Running costs:</b> about %s a month at the start, %s a month at 10 times the size.</p>"
                      % (money(costs["budget_caps"]["fixed_cost_usd_month"]), money(costs["budget_caps"]["fixed_cost_10x_usd_month"])))
-        H.append("<h3>Goals and dates to aim for</h3><div class=tl>" + "".join("<div><b>%s</b>%s</div>" % (e(g["goal"]), e(g["by"])) for g in ue["ladder"]) + "</div>")
+        H.append("<h3>Steps and rough dates</h3><div class=tl>" + "".join("<div><b>%s</b>%s</div>" % (e(g["goal"]), e(g["by"])) for g in ue["ladder"]) + "</div>")
         end()
 
     # ================= PART 6: TRUST + FOR/AGAINST =================
