@@ -231,7 +231,7 @@ def urls_in(obj, acc):
 
 
 QUESTIONS = {
-    "demand": "Do people search for it?", "value": "Are buyers worth money?", "market": "Is the market big enough?",
+    "demand": "Are there enough buyers?", "value": "Are buyers worth money?", "market": "Is the market big enough?",
     "kd_dr": "Can a new site get onto Google?", "weak_spots": "Are the rivals weak anywhere?", "advantage": "Do we have an edge?", "proof": "Do real businesses earn here?",
     "costs": "Is it cheap to run?",
 }
