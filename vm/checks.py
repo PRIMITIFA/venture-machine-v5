@@ -101,7 +101,7 @@ def consistency(c):
         early = [r for r in cal if r["date"] < tl["build_from"]]
         if early:
             out.append(f"{len(early)} calendar items are dated before the validation test ends ({tl['build_from']})")
-    month12 = num(fc.get("mid")) * 12 / 78 if fc else 0  # month-12 run rate of a straight ramp
+    month12 = num(d.get("forecast_basis_usd") or fc.get("mid")) * 12 / 78 if fc else 0  # month-12 run rate of a straight ramp
     for st in ue.get("ladder") or []:
         m = re.match(r"\$([\d,]+)\s*a month", st.get("goal", ""))
         if m and re.match(r"\d{4}-\d\d-\d\d", st.get("by", "")) and num(m.group(1).replace(",", "")) > month12 + 1:

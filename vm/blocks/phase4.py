@@ -431,7 +431,12 @@ Do not write about a sales goal or target revenue. Never give away free the same
         fc["high"] = round(cap)
     fc["mid"] = min(fc["mid"], fc["high"])
     fc["low"] = min(fc["low"], fc["mid"])
-    tl = timeline(offer, fc["mid"], market)
+    # second forecast from counted buyers (official yearly count x a newcomer's share x price), because search undercounts small niches.
+    # The share is reached by month 12 on the same straight ramp, so year one = 6.5 x the month-12 rate. ASSUMPTION, shown as such.
+    ppl = c.v["data"].get("people_newcomer_month") or None
+    fcp = {k: round(v * 78 / 12) for k, v in zip(("low", "mid", "high"), ppl)} if ppl else None
+    basis = max(fc["mid"], fcp["low"]) if fcp else fc["mid"]   # dates use the search forecast, or the cautious end of the buyer count if larger
+    tl = timeline(offer, basis, market)
     ue = c.read("16_unit_economics.json")
     ue["ladder"] = tl["steps"]
     c.write("16_unit_economics.json", ue)
@@ -454,7 +459,8 @@ Do not write about a sales goal or target revenue. Never give away free the same
         cal.append({"week": 2, "date": (start + dt.timedelta(weeks=1)).isoformat(), "type": "ai search", "item": a, "keyword": "", "kd": "", "data_source": ""})
     cal.sort(key=lambda r: (r["week"], r["type"]))
     write_csv(c.path("19_seo_calendar_90d.csv"), cal, ["week", "date", "type", "item", "keyword", "kd", "data_source"])
-    store.set_data(c.slug, advantage_score=out.advantage_score, advantage_reason=out.advantage_reason, forecast_12m_usd=fc, forecast_note=fc_note, timeline=tl)
+    store.set_data(c.slug, advantage_score=out.advantage_score, advantage_reason=out.advantage_reason, forecast_12m_usd=fc, forecast_note=fc_note, timeline=tl,
+                   forecast_people_12m_usd=fcp, forecast_basis_usd=basis)
     test_md = (f"{test['test']}: {test['sample']}; {test['days']} days{' after ' + str(test['warmup_days']) + ' days of warm-up' if test.get('warmup_days') else ''}; "
                f"budget ${test['budget_usd']:g}. PASS if: {test['pass_threshold']}. KILL if: {test['kill_threshold']}.") if test else "none planned"
     plan_md = f"""# Business plan: {c.slug}

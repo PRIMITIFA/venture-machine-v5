@@ -210,8 +210,8 @@ def knockouts(c):
     month, floor, target = market / 12, S.min_market_month, S.target_market_month
     best = c.v["data"].get("proof_best_30d") or 0
     if month < target and best >= S.proof_min_usd:
-        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but a real business in this niche "
-                                               f"made ${best:,.0f} in the last 30 days (payment-verified). The niche pays; search alone does not carry it. "
+        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but a comparable business (same kind of product; see the revenue proof for how close it is) "
+                                               f"made ${best:,.0f} in the last 30 days (payment-verified). This kind of product pays; search alone does not carry it. "
                                                "Test the channel that business uses (see the revenue proof) before building.")
     ppl = c.v["data"].get("people_newcomer_month") or None
     if month < floor and ppl and ppl[1] >= floor:
@@ -232,7 +232,7 @@ def memo3(c):
     s, avg = gate3_scores(c)
     rec = "KILL" if avg < 3.0 else "QUICK TEST (7 days, capped)" if avg < 3.5 else "FULL BUILD"
     # safety rule: good scores but a forecast below the smallest size worth building is not a full build
-    fc = (c.v["data"].get("forecast_12m_usd") or {}).get("mid")
+    fc = c.v["data"].get("forecast_basis_usd") or (c.v["data"].get("forecast_12m_usd") or {}).get("mid")
     cap_note = ""
     if rec == "FULL BUILD" and fc is not None and fc < S.min_market_usd:
         rec = "QUICK TEST (7 days, capped)"

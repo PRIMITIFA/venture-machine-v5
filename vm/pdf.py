@@ -466,18 +466,28 @@ def build_html(slug):
 
     def verdict(ok, care):
         return ("good", GOOD) if ok else ("careful", CARE) if care else ("problem", BAD)
+    pr0 = jf("02_proof.json") or {}
+    bc0, pp0 = pr0.get("buyer_count") or {}, pr0.get("people") or {}
+    if bc0.get("figure"):
+        n0 = num(bc0["figure"])
+        glance.append(("Buyers counted", "{:,} people a year face this need ({}){}".format(int(n0), (bc0.get("source_name") or "source in the report")[:70],
+                       "" if bc0.get("official") else "; not an official figure"), *verdict(n0 >= 5000, n0 >= 1000)))
     if buy:
         top_cpc = max(num(k["cpc"]) for k in buy)
-        glance.append(("Demand", "{:,} buying searches a month ({:,} commercial + 10% of {:,} for a rival's name)".format(buy_vol, split["commercial"], split["brand"])
+        glance.append(("Search demand", "{:,} buying searches a month ({:,} commercial + 10% of {:,} for a rival's name)".format(buy_vol, split["commercial"], split["brand"])
                        if split["brand"] else "{:,} searches a month from people ready to buy".format(buy_vol), *verdict(buy_vol >= 1000, buy_vol >= 300)))
         from .util import weighted_cpc
         wc_ = weighted_cpc(kws or [])
-        glance.append(("Buyer value", "advertisers pay about %s per click on average across the buying searches (highest single one %s)" % (money(wc_), money(top_cpc)), *verdict(wc_ >= 2, wc_ >= 1)))
+        glance.append(("Ad click price", "advertisers pay about %s per click on average across the buying searches (highest single one %s)" % (money(wc_), money(top_cpc)), *verdict(wc_ >= 2, wc_ >= 1)))
+    if pp0.get("price_usd"):
+        glance.append(("What a buyer pays", "one customer pays the leading rival about %s" % money(pp0["price_usd"]), *verdict(pp0["price_usd"] >= 150, pp0["price_usd"] >= 50)))
     pr_ = jf("02_proof.json")
     if pr_ and pr_.get("checked"):
         from . import proof as _proof
         best30 = _proof.best_revenue(pr_)
-        glance.append(("Proven revenue", ("a real business in this niche made %s in the last 30 days (payment-verified)" % money(best30)) if best30
+        same_ = any(x_.get("closeness") == 3 and x_.get("revenue_30d_usd") == best30 for x_ in pr_.get("comparables") or [])
+        glance.append(("Proven revenue", (("a real business in this niche made %s in the last 30 days (payment-verified)" if same_ else
+                                           "a business selling the same kind of product in a neighbouring niche made %s in the last 30 days (payment-verified); none found in this exact niche") % money(best30)) if best30
                        else "no business with verified revenue found in this niche", *verdict(best30 >= S.proof_min_usd, best30 >= 1000)))
     if how and not biz:
         priced = [x_ for x_ in how.get("competitors", []) if x_.get("price") and "unknown" not in x_["price"].lower()]
@@ -527,7 +537,11 @@ def build_html(slug):
             glance.append(("Rivals", "the weakest direct rival has strength %d/100%s%s" % (min(drs), extra, ("; gap: " + first_sentence(biz["identified_gap"], 100)) if biz else ""),
                            *verdict(min(drs) < 40, min(drs) < 60)))
     if mk:
-        glance.append(("Market size", "about %s a month (%s a year) reachable through Google search" % (money(round(mk_up / 12)), money(mk_up)),
+        if pp0.get("newcomer"):
+            lo_, mid_, hi_ = pp0["newcomer"]["month_usd"]
+            glance.append(("Market size, counted buyers", "about %s a month for a newcomer (%s to %s); the share is an assumption" % (money(mid_), money(lo_), money(hi_)),
+                           *verdict(lo_ >= S.target_market_month, mid_ >= S.min_market_month)))
+        glance.append(("Market size, Google search alone", "about %s a month (%s a year) reachable through Google search" % (money(round(mk_up / 12)), money(mk_up)),
                        *verdict(mk_up / 12 >= S.target_market_month, mk_up / 12 >= S.min_market_month)))
     if uec:
         ads_ok = uec.get("paid_search_cac") is not None and uec["paid_search_cac"] <= uec.get("max_cac", 0)
@@ -536,8 +550,12 @@ def build_html(slug):
     fc = data.get("forecast_12m_usd") or {}
     if fc.get("mid") is not None:
         goal_ = S.min_market_usd
-        glance.append(("First-year sales", "likely %s, about %s a month (bad case %s, good case %s)" % (money(fc.get("mid")), money(round(fc["mid"] / 12)), money(fc.get("low")), money(fc.get("high"))),
+        glance.append(("First-year sales, Google search alone", "likely %s, about %s a month (bad case %s, good case %s)" % (money(fc.get("mid")), money(round(fc["mid"] / 12)), money(fc.get("low")), money(fc.get("high"))),
                        *verdict(fc["mid"] >= goal_, fc.get("high", 0) >= goal_)))
+    fcp = data.get("forecast_people_12m_usd") or {}
+    if fcp:
+        glance.append(("First-year sales, counted buyers", "likely %s (bad case %s, good case %s) if a newcomer's share is reached by month 12. An assumption, not a measurement" % (money(fcp.get("mid")), money(fcp.get("low")), money(fcp.get("high"))),
+                       *verdict(fcp.get("low", 0) >= S.min_market_usd, fcp.get("mid", 0) >= S.min_market_usd)))
     if eeat:
         oks = sum(1 for k in ("real_person_or_company", "expertise_proof", "unique_data_per_page", "contacts_policies_real_example") if eeat[k]["ok"])
         n_if = sum(1 for k in ("real_person_or_company", "expertise_proof", "unique_data_per_page", "contacts_policies_real_example")
@@ -608,7 +626,8 @@ def build_html(slug):
         three = ["Main score %d out of 100. %s" % (score100, why),
                  "Strongest point: %s %s. Weakest point: %s %s." % (QMAP.get(best_k, best_k), first_sentence(scores[best_k][1], 140).rstrip("."), QMAP.get(worst_k, worst_k), first_sentence(scores[worst_k][1], 140).rstrip("."))]
         if fc_mid is not None:
-            three.append("Likely first-year sales: %s, about %s a month." % (money(fc_mid), money(round(fc_mid / 12))))
+            three.append("Likely first-year sales from Google search alone: %s, about %s a month." % (money(fc_mid), money(round(fc_mid / 12))) +
+                         ((" Counting the buyers gives %s to %s (an assumption about the share a newcomer wins); search tools undercount small niches, so the two differ this much." % (money(fcp.get("low")), money(fcp.get("high")))) if fcp else ""))
         H.append("<h3>In three sentences</h3>" + bullets(three))
     elif sc:
         H.append("<h3>In three sentences%s</h3>" % (" (from the first look)" if kws else "") + bullets(sc["summary_3_lines"]))
@@ -985,8 +1004,12 @@ def build_html(slug):
                 H.append("<h3>What to sell</h3>" + md(prod.group(1)))
             fcd = data.get("forecast_12m_usd") or {}
             if fcd:
-                H.append("<p><b>First-year sales forecast:</b> bad case %s &middot; likely %s &middot; good case %s. %s</p>"
+                H.append("<p><b>First-year sales forecast (Google search alone):</b> bad case %s &middot; likely %s &middot; good case %s. %s</p>"
                          % (money(fcd.get("low")), money(fcd.get("mid")), money(fcd.get("high")), e(data.get("forecast_note") or "")))
+                if fcp:
+                    H.append("<p><b>First-year sales from counted buyers:</b> bad case %s &middot; likely %s &middot; good case %s. This takes the official yearly number of buyers, the share a newcomer wins (2%%, 5%%, 8%%, reached by month 12) and the leading rival's price. "
+                             "The share is an ASSUMPTION; it fits small niches with few rivals and is too high for crowded ones. The dates below use the bad case.</p>"
+                             % (money(fcp.get("low")), money(fcp.get("mid")), money(fcp.get("high"))))
         tst = offer.get("test")
         if tst:
             H.append("<div class=card><h4>The one validation test%s</h4><p class=small><b>%s</b>: %s. %s days%s, budget %s, at the price of %s.</p>"
