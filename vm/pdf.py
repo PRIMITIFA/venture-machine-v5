@@ -509,12 +509,18 @@ def build_html(slug):
     if pulse:
         ch = pulse.get("change_24m_pct_best")
         kwt = pulse.get("kw_trend_12m_pct")
+        thin = ch is not None and sum(1 for x_ in (pulse.get("trend") or {}).values() if x_.get("change_24m_pct") is not None) <= 1
         if pulse["status"] == "unknown" or (ch is None and kwt is None):
             txt = "not enough data to tell if interest is growing or shrinking"
         elif ch is None and kwt is not None:
             txt = "our own keywords' searches are %s %d%% in 12 months (source: Google Ads monthly search numbers; Google Trends had no data)" % ("up" if kwt >= 0 else "down", abs(kwt))
         elif pulse["status"] == "dying":
             txt = "interest is shrinking"
+        elif thin and kwt is not None:
+            # Google Trends had data for one wording only: the basket of our own searches is the wider measure, so it leads
+            one_ = next((k_ for k_, x_ in (pulse.get("trend") or {}).items() if x_.get("change_24m_pct") is not None), "")
+            txt = "our own searches are %s %d%% in 12 months (Google Ads monthly numbers%s); one wording alone, \"%s\", is %s %d%% in 2 years on Google Trends" % (
+                "up" if kwt >= 0 else "down", abs(kwt), (", " + pulse["kw_trend_basis"]) if pulse.get("kw_trend_basis") else "", one_, "up" if ch >= 0 else "down", abs(ch))
         elif ch is not None and ch < -10:
             txt = "searches are down %d%% in 2 years, but people still buy (ads, new sites, questions)" % abs(ch)
         elif ch is not None and ch > 10:
@@ -525,7 +531,7 @@ def build_html(slug):
         if rt is not None:
             txt += "; the top rivals' Google visits are %s %d%% over 12 months" % ("up" if rt >= 0 else "down", abs(rt))
         known = ch is not None or kwt is not None
-        up = (ch is not None and ch >= -10) or (ch is None and kwt is not None and kwt >= -10)
+        up = (kwt >= -10) if (thin and kwt is not None) else ((ch is not None and ch >= -10) or (ch is None and kwt is not None and kwt >= -10))
         shrinking_rivals = rt is not None and rt < -30
         good_trend = pulse["status"] == "alive" and known and up and not shrinking_rivals
         glance.append(("Trend", txt, *verdict(good_trend, pulse["status"] != "dying")))
