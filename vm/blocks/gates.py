@@ -210,9 +210,10 @@ def knockouts(c):
     month, floor, target = market / 12, S.min_market_month, S.target_market_month
     best = c.v["data"].get("proof_best_30d") or 0
     if month < target and best >= S.proof_min_usd:
-        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but a comparable business (same kind of product; see the revenue proof for how close it is) "
-                                               f"made ${best:,.0f} in the last 30 days (payment-verified). This kind of product pays; search alone does not carry it. "
-                                               "Test the channel that business uses (see the revenue proof) before building.")
+        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: Google search alone reaches about ${month:,.0f} a month here, under the ${target:,.0f} target. "
+                                               f"A comparable business made ${best:,.0f} in the last 30 days (payment-verified), so this kind of product sells, "
+                                               "but that is not yet shown for this exact idea (the revenue proof says how close it is). "
+                                               "A short, cheap test settles it before you build: use the channels that business uses.")
     ppl = c.v["data"].get("people_newcomer_month") or None
     if month < floor and ppl and ppl[1] >= floor:
         return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but counting the buyers gives "

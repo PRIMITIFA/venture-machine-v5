@@ -301,8 +301,12 @@ def answer_of(v, data, n_done):
     if rec.startswith("FULL"):
         return "LOOKS GOOD: BUILD IT", GOOD, "It scored %d out of 100 on the checks that matter most." % round(num(data.get("gate3_score")) * 20)
     if rec.startswith("QUICK"):
-        why = data.get("gate3_cap_note") or "Not clear enough to build; run a small capped test first."
-        return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %d out of 100. %s" % (round(num(data.get("gate3_score")) * 20), why)
+        why = re.sub(r"^Capped at TEST:\s*", "", data.get("gate3_cap_note") or "Not clear enough to build; run a small capped test first.")
+        why = why[:1].upper() + why[1:]
+        s100 = round(num(data.get("gate3_score")) * 20)
+        if s100 >= 70:
+            return "STRONG IDEA: PROVE IT WITH A SMALL TEST", GOOD, "It scored %d out of 100, which is in the build range. One thing holds it at a test first. %s" % (s100, why)
+        return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %d out of 100. %s" % (s100, why)
     if rec.startswith("KILL"):
         if (data.get("gate3_cap_note") or "").startswith("Knock-out"):
             return "DON'T BUILD IT", BAD, "It scored %d out of 100, but one rule decides on its own. %s" % (round(num(data.get("gate3_score")) * 20), data["gate3_cap_note"])
@@ -395,7 +399,8 @@ def build_html(slug):
     spin = data.get("spin_off") or {}
     worries = ["Step %s (%s) said stop, and you chose to continue. Your reason: \"%s\"" % (g["gate"], STEP_NAMES.get(g["gate"], ""), g["note"]) for g in overridden]
     went_against = [g for g in decisions if (g.get("note") or "").startswith("OVERRIDE:")]
-    worries += ["At decision %s you chose %s" % ({"05": "1", "14": "2", "18": "3"}.get(g["gate"], g["gate"]), first_sentence(g["note"][10:].split(" | owner:")[0], 200)) for g in went_against]
+    if went_against:
+        worries.append("You continued past decision %s although some checks were weak. Those checks are in this list." % " and ".join(sorted({{"05": "1", "14": "2", "18": "3"}.get(g["gate"], g["gate"]) for g in went_against})))
     main_done = bool(scores) and not first and not quick
     for bid in sorted(bl):
         st_ = bl[bid]
@@ -407,20 +412,27 @@ def build_html(slug):
         elif bid == "04" and sc:
             w = "The first-look score is only %d out of 100 (60 or more is good)." % round(sc["ice_avg"] * 10)
         elif bid == "12" and mk:
-            w = "Only about %s a month is reachable through Google search; we want %s a month or more." % (money(round(mk_up / 12)), money(S.target_market_month))
+            w = "Google search alone reaches about %s a month; the target is %s a month or more%s." % (
+                money(round(mk_up / 12)), money(S.target_market_month), ", so the rest has to come from other channels (groups, email, partners)" if data.get("people_newcomer_month") else "")
+        elif bid == "09" and re.search(r"(\d+) buying clusters in top 20", summ):
+            w = "Only %s of the 20 best search topics come from people ready to buy; the rest are people still reading up." % re.search(r"(\d+) buying clusters in top 20", summ).group(1)
+        elif bid == "13" and re.search(r"^0 good link targets", summ):
+            w = "No good sites to get links from were found%s. Links will have to be earned another way (free tools, state pages others cite)." % (
+                (" (%s were checked and rejected)" % re.search(r"(\d+) rejected", summ).group(1)) if re.search(r"(\d+) rejected", summ) else "")
         elif bid == "16" and uec.get("paid_search_cac") and uec["paid_search_cac"] > uec.get("max_cac", 0):
             w = "Paid ads would lose money: one customer from Google ads costs about %s, but you keep only %s per sale. Use free channels (Google search results, email)." % (money(uec["paid_search_cac"]), money(uec["net_per_sale"]))
         else:
             w = "%s %s" % (STEP_NAMES.get(bid, bid) + ":", first_sentence(summ))
         worries.append(w)
-    if data.get("gate3_cap_note") and main_done:
-        worries.insert(0, data["gate3_cap_note"])
+    if data.get("gate3_cap_note") and main_done and not (data.get("gate3_recommendation") or "").startswith("QUICK"):
+        worries.insert(0, data["gate3_cap_note"])   # for a test verdict the same words already stand in the answer box
     if dropped_kw:
         worries.append("%d searches were thrown out because Google shows something else for them (for example \"%s\": %s)."
                        % (len(dropped_kw), dropped_kw[0]["keyword"], first_sentence(dropped_kw[0]["reason"], 120)))
     if sc and sc.get("risks"):
         worries += [first_sentence(r) for r in sc["risks"][:3]]
 
+    worries = list(dict.fromkeys(worries))   # the same worry never twice
     st = v["status"]
     nxt = []
     if st.startswith("gate_"):
@@ -623,7 +635,7 @@ def build_html(slug):
             "<tr><td class=t>%s</td><td>%s</td><td class=n>%s</td></tr>" % (e(t), e(f), pill(w, c)) for t, f, w, c in glance) + "</table>")
     if main_done:
         best_k, worst_k = max(scores, key=lambda k_: scores[k_][0]), min(scores, key=lambda k_: scores[k_][0])
-        three = ["Main score %d out of 100. %s" % (score100, why),
+        three = [why if why.startswith("It scored") else "Main score %d out of 100. %s" % (score100, why),
                  "Strongest point: %s %s. Weakest point: %s %s." % (QMAP.get(best_k, best_k), first_sentence(scores[best_k][1], 140).rstrip("."), QMAP.get(worst_k, worst_k), first_sentence(scores[worst_k][1], 140).rstrip("."))]
         if fc_mid is not None:
             three.append("Likely first-year sales from Google search alone: %s, about %s a month." % (money(fc_mid), money(round(fc_mid / 12))) +
@@ -631,6 +643,32 @@ def build_html(slug):
         H.append("<h3>In three sentences</h3>" + bullets(three))
     elif sc:
         H.append("<h3>In three sentences%s</h3>" % (" (from the first look)" if kws else "") + bullets(sc["summary_3_lines"]))
+    if main_done:
+        proven, unproven = [], []
+        if bc0.get("figure"):
+            proven.append("%s people a year face this need (%s)" % ("{:,}".format(int(num(bc0["figure"]))), "official figure" if bc0.get("official") else "not an official figure"))
+        if buy:
+            proven.append("%s searches a month from people ready to buy (Google's own numbers; these tools tend to undercount small niches)" % "{:,}".format(buy_vol))
+        if pp0.get("price_usd"):
+            proven.append("buyers pay the leading rival about %s" % money(pp0["price_usd"]))
+        if seo_:
+            drs_ = [num(s_["dr"]) for s_ in seo_["competitors"] if s_.get("kind", "direct") == "direct" and s_.get("dr") is not None]
+            if drs_:
+                proven.append("the weakest direct rival's site has strength %d of 100" % min(drs_))
+        cands_ = [x_ for x_ in pr0.get("comparables") or [] if x_.get("closeness", 1) >= 2] if pr0.get("checked") else []
+        best_ = max(cands_, key=lambda x_: x_["revenue_30d_usd"]) if cands_ else None
+        if best_:
+            same2 = best_.get("closeness") == 3
+            proven.append("%s made %s in the last 30 days (payment-verified)%s" % (best_["name"], money(best_["revenue_30d_usd"]), "" if same2 else ", in a neighbouring niche"))
+            if not same2:
+                unproven.append("nobody with verified revenue was found in this exact niche")
+        if pp0.get("newcomer"):
+            unproven.append("the share of buyers a new site wins (2% to 8% is an assumption; one real case backs the leader's share, none backs the newcomer's)")
+        if offer.get("channel"):
+            unproven.append("that buyers can be reached without paid ads (the test below checks this)")
+        unproven.append("that buyers pick a new name over the known rival at %s" % money(offer.get("price_usd"))) if offer.get("price_usd") else None
+        if proven and unproven:
+            H.append("<div class=two><div><h3>What is measured</h3>%s</div><div><h3>What is still a guess</h3>%s</div></div>" % (bullets(proven), bullets(unproven)))
     H.append("<div class=two><div><h3>Top worries</h3>%s</div><div><h3>What to do next</h3><ol class=steps>%s</ol></div></div>"
              % ("<div class=worry>%s</div>" % bullets(worries[:4]) if worries else "<p>Nothing serious was flagged.</p>",
                 "".join("<li>%s</li>" % e(x) for x in nxt[:4])))
