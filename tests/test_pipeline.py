@@ -657,6 +657,22 @@ class RevenueProof(unittest.TestCase):
         finally:
             gates.market_at_chosen_price = old
 
+    def test_app_store_rivals_do_not_share_an_ad_count(self):
+        proof, real = self.proof, type(self).__dict__["_ads"]
+        seen = []
+        old_read, old_cmd = proof.read_page, os.environ.get("VM_BROWSER_CMD")
+        os.environ["VM_BROWSER_CMD"] = "x"
+        proof.read_page = lambda url, max_chars=6000: (seen.append(url) or ("~7 results" if "Alpha" in url else "~1 results"))
+        try:
+            a = real("Alpha App", "apps.apple.com")
+            b = real("Beta App", "apps.apple.com")
+        finally:
+            proof.read_page = old_read
+            os.environ.pop("VM_BROWSER_CMD") if old_cmd is None else os.environ.__setitem__("VM_BROWSER_CMD", old_cmd)
+        self.assertEqual((a["meta_ads"], b["meta_ads"]), (7, 1))       # each rival has its own count
+        self.assertEqual((a["domain"], a["google_ads"]), ("", None))   # no own domain: Google ads are 'not checked', never zero
+        self.assertFalse(any("adstransparency" in u for u in seen))
+
     def test_unchecked_is_never_reported_as_nothing_found(self):
         self.assertIn("not checked", self.proof.summary({"checked": False}))
         self.assertIn("no real business", self.proof.summary({"checked": True, "comparables": []}))

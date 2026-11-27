@@ -202,6 +202,10 @@ def comparables(idea, extra_terms=(), max_n=6):
 
 
 # ---------------- do the rivals buy ads? ----------------
+SHARED_HOSTS = {"apps.apple.com", "play.google.com", "chromewebstore.google.com", "udemy.com", "amazon.com", "etsy.com", "gumroad.com", "youtube.com",
+                "facebook.com", "instagram.com", "linkedin.com", "x.com", "twitter.com", "github.com", "fiverr.com", "tiktok.com", "substack.com", "trustmrr.com"}
+
+
 def read_page(url, max_chars=6000):
     """Read a page through the owner's browser command (VM_BROWSER_CMD), for pages that need a real browser. '' when not set or blocked."""
     cmd = S.browser_cmd
@@ -217,10 +221,12 @@ def read_page(url, max_chars=6000):
 
 def ads(name, domain):
     """How many ads a rival runs, from the two public ad libraries. None = could not be checked (never read that as zero)."""
+    if domain in SHARED_HOSTS:   # an app-store or marketplace page is not the rival's own domain: many rivals share it
+        domain = ""
     out = {"name": name, "domain": domain, "meta_ads": None, "google_ads": None}
     if not S.browser_cmd:
         return out
-    key = f"proof:ads:{domain or name}"
+    key = f"proof:ads:{domain}" if domain else f"proof:ads:name:{name.lower()}"
     hit = store.cache_get(key, 14)
     if hit is not None:
         return hit
