@@ -106,6 +106,16 @@ class Settings:
         return _f("VM_GOOD_CASE_SHARE", 0.35)
 
     @property
+    def day_max_usd(self):
+        """Most data money the machine may spend in one calendar day, over every idea, every data folder and every hand-run lookup."""
+        return _f("VM_DAY_MAX_USD", 5)
+
+    @property
+    def spend_file(self):
+        """One shared day-by-day spend record. It lives outside the data folder on purpose: several data folders must share one cap."""
+        return pathlib.Path(os.environ.get("VM_SPEND_FILE", pathlib.Path.home() / ".venture-machine" / "spend.json"))
+
+    @property
     def trustmrr_key(self):
         """Key for the verified-revenue database (revenue proof). Without it the proof step is skipped and says so."""
         return os.environ.get("TRUSTMRR_API_KEY", "").strip()

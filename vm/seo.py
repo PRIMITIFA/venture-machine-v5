@@ -87,6 +87,11 @@ def post(endpoint, task):
     if not available():
         raise DFSError("DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD are not set (see .env.example)")
     budget.check(EST.get(endpoint, 0.05))
+    if budget.day().get("start_balance") is None:   # first paid call of the day: remember the real balance, to check the count against it
+        try:
+            budget.note_start_balance(balance())
+        except Exception:
+            pass
     r = httpx.post(BASE + endpoint, json=[task], auth=(S.dfs_login, S.dfs_password), timeout=180)
     try:
         d = r.json()

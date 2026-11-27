@@ -88,6 +88,26 @@ def cmd_proof(a):
         print(f"${x['revenue_30d_usd']:>8,}  {x['founded'] or '   ?   '}  {x['name'][:30]:<30}  {x['website']}")
 
 
+def cmd_spend(a):
+    """Data money spent today: what the machine recorded, and what the provider's balance really says."""
+    from . import budget
+    d = budget.day()
+    print(f"recorded today : ${d['usd']:.2f} in {d['calls']} paid calls (cap ${S.day_max_usd:.2f} a day, VM_DAY_MAX_USD)")
+    if seo.available():
+        try:
+            now = seo.balance()
+            print(f"balance now    : ${now:.2f}")
+            if d.get("start_balance") is not None:
+                real = d["start_balance"] - now
+                print(f"balance at the first paid call today: ${d['start_balance']:.2f}  ->  really spent ${real:.2f}")
+                if abs(real - d["usd"]) > 0.25:
+                    print(f"NOTE: the recorded figure and the real one differ by ${abs(real - d['usd']):.2f} (other tools on the same account, or a top-up). Trust the balance.")
+        except Exception as e:
+            print(f"balance        : ERROR {e}")
+    left = S.day_max_usd - d["usd"]
+    print("left today     : " + (f"${left:.2f}" if left > 0 else "nothing: the daily cap is reached, paid calls are refused until tomorrow or until the cap is raised"))
+
+
 def cmd_doctor(a):
     print(f"data folder : {S.data_dir}")
     print(f"AI provider : {ai.provider()}  (smart={S.model_smart}, fast={S.model_fast})")
@@ -159,6 +179,7 @@ def main(argv=None):
     s.add_argument("slug")
     s.set_defaults(f=cmd_pdf)
     sub.add_parser("doctor", help="check keys, balance and setup").set_defaults(f=cmd_doctor)
+    sub.add_parser("spend", help="data money spent today: recorded, real balance, and what is left under the daily cap").set_defaults(f=cmd_spend)
     s = sub.add_parser("proof", help="verified revenue of real businesses: sync (pull), bands (what sites earn per visitor), discover (young businesses that already earn)")
     s.add_argument("action", choices=["sync", "bands", "discover"])
     s.add_argument("--min", type=float, default=5000, help="lowest revenue in the last 30 days, in dollars (sync: use 500 to pull widely)")

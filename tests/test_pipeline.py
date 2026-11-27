@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="vm-test-"))
 import atexit  # noqa: E402
 atexit.register(lambda: shutil.rmtree(TMP, ignore_errors=True))  # every test class shares the folder
+os.environ.update(VM_SPEND_FILE=str(TMP / "spend.json"), VM_DAY_MAX_USD="1000")
 os.environ.update(VM_DATA_DIR=str(TMP / "data"), VM_VENTURES_DIR=str(TMP / "ventures"), VM_AI_PROVIDER="fake",
                   DATAFORSEO_LOGIN="x", DATAFORSEO_PASSWORD="y", VM_MAX_USD_PER_IDEA="5", VM_PHASE1_MAX_USD="0.5")
 
@@ -719,6 +720,36 @@ class FourthAudit(unittest.TestCase):
         self.assertGreaterEqual(ends, "2027-01-18")
         tl2 = phase4.timeline(offer, 800, 7000, today=dt.date(2026, 9, 1))     # far from the holidays: unchanged
         self.assertEqual([s_["by"] for s_ in tl2["steps"] if s_["goal"].startswith("validation test ends")][0], "2026-09-15")
+
+
+class DailySpend(unittest.TestCase):
+    """2026-11-27: $20 was spent against a $10 limit, across four data folders and hand-run lookups, with only a running tally."""
+
+    def test_one_daily_cap_over_every_folder_and_hand_run_lookup(self):
+        os.environ["VM_SPEND_FILE"] = str(TMP / "spend-day.json")
+        os.environ["VM_DAY_MAX_USD"] = "1"
+        old = dict(budget.CURRENT)
+        try:
+            budget.CURRENT.update(slug=None, block=None)          # a lookup run by hand, outside any idea
+            budget.day_check(0.4)
+            budget.record("dataforseo", "serp", 0.6)
+            budget.record("dataforseo", "serp", 0.0, counted=False, cached=True)   # a cached answer costs nothing
+            budget.record("claude-cli", "ask", 3.0)                               # AI usage is not data money
+            self.assertEqual(budget.day()["usd"], 0.6)
+            os.environ["VM_DATA_DIR"], keep = str(TMP / "other-folder"), os.environ["VM_DATA_DIR"]
+            try:
+                self.assertEqual(budget.day()["usd"], 0.6)        # another data folder sees the same total
+                with self.assertRaises(budget.BudgetExceeded):
+                    budget.check(0.5)                            # 0.6 + 0.5 is over the $1 day cap, even with no idea running
+            finally:
+                os.environ["VM_DATA_DIR"] = keep
+            budget.note_start_balance(25.34)
+            budget.note_start_balance(9.99)                       # only the first balance of the day is kept
+            self.assertEqual(budget.day()["start_balance"], 25.34)
+        finally:
+            budget.CURRENT.update(old)
+            os.environ["VM_SPEND_FILE"] = str(TMP / "spend.json")
+            os.environ["VM_DAY_MAX_USD"] = "1000"
 
 
 if __name__ == "__main__":
