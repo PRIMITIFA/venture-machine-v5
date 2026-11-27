@@ -232,7 +232,7 @@ def urls_in(obj, acc):
 
 QUESTIONS = {
     "demand": "Do people search for it?", "value": "Are buyers worth money?", "market": "Is the market big enough?",
-    "kd_dr": "Can a new site get onto Google?", "weak_spots": "Are the rivals weak anywhere?", "advantage": "Do we have an edge?",
+    "kd_dr": "Can a new site get onto Google?", "weak_spots": "Are the rivals weak anywhere?", "advantage": "Do we have an edge?", "proof": "Do real businesses earn here?",
     "costs": "Is it cheap to run?",
 }
 
@@ -299,14 +299,14 @@ def answer_of(v, data, n_done):
     if st == "quick_test":
         return "TEST IT CHEAPLY FIRST", CARE, "You chose a small, capped test before building. The test plan is below."
     if rec.startswith("FULL"):
-        return "LOOKS GOOD: BUILD IT", GOOD, "It scored %d out of 100 on the 7 checks that matter most." % round(num(data.get("gate3_score")) * 20)
+        return "LOOKS GOOD: BUILD IT", GOOD, "It scored %d out of 100 on the checks that matter most." % round(num(data.get("gate3_score")) * 20)
     if rec.startswith("QUICK"):
         why = data.get("gate3_cap_note") or "Not clear enough to build; run a small capped test first."
         return "MAYBE: TEST IT CHEAPLY FIRST", CARE, "It scored %d out of 100. %s" % (round(num(data.get("gate3_score")) * 20), why)
     if rec.startswith("KILL"):
         if (data.get("gate3_cap_note") or "").startswith("Knock-out"):
             return "DON'T BUILD IT", BAD, "It scored %d out of 100, but one rule decides on its own. %s" % (round(num(data.get("gate3_score")) * 20), data["gate3_cap_note"])
-        return "DON'T BUILD IT", BAD, "It scored only %d out of 100 on the 7 checks that matter most." % round(num(data.get("gate3_score")) * 20)
+        return "DON'T BUILD IT", BAD, "It scored only %d out of 100 on the checks that matter most." % round(num(data.get("gate3_score")) * 20)
     if fs is not None:
         return "NOT FINISHED YET", "#52525b", "First-look score %d out of 100. The machine has done %d of 18 steps; the main score comes when the research is done." % (fs, n_done)
     return "NOT FINISHED YET", "#52525b", "The machine has done %d of 18 steps so far. Run it again to continue." % n_done
@@ -569,7 +569,7 @@ def build_html(slug):
     H.append("<div class=hero style='background:%s'><div class=herogrid>%s<div><div class=lbl>THE ANSWER</div><div class=ans>%s</div><p>%s</p></div></div></div>"
              % (color, ring, e(ans), e(why)))
     stage = [("First look", "3 checks, about 1 cent", first100 is not None, first100),
-             ("Main score", "7 checks, after the full research", bool(scores) and not first and not quick, score100 if (scores and not first and not quick) else None)]
+             ("Main score", "7 or 8 checks, after the full research", bool(scores) and not first and not quick, score100 if (scores and not first and not quick) else None)]
     if old_steps:
         H.append("<div class=worry><b>OUT OF DATE: do not decide on this report.</b> Steps %s ran under older rules or older results. "
                  "Refresh it (no new data is bought for searches already fetched): <b>vm run %s</b></div>" % (e(", ".join(old_steps)), e(slug)))
@@ -592,10 +592,10 @@ def build_html(slug):
             "<div><span class=q>%s</span><span class=bar><i style='width:%d%%;background:%s'></i></span><b>%d</b></div>"
             % (e(QMAP.get(k, k)), val * 20, GOOD if val >= 4 else CARE if val >= 3 else BAD, val * 2) for k, (val, _w) in scores.items()) + "</div>"
             + ("<p class='small mute'>First-look score = the average of the 3, out of 100. Under 60: weak as written. 60 or more: worth the paid research. "
-               "This is an early judgement from what the AI found on the web, before any Google numbers. The main score (7 checks) replaces it after the full research.</p>" if first else
+               "This is an early judgement from what the AI found on the web, before any Google numbers. The main score (7 or 8 checks) replaces it after the full research.</p>" if first else
                "<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
                "A quick check does not look at rivals, AI assistants, market size or money yet.</p>" if quick else
-               "<p class='small mute'>Overall score = the 7 combined so that one very low score pulls the whole result down, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build. "
+               "<p class='small mute'>Overall score = all the checks combined so that one very low score pulls the whole result down, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build. "
                "Rules that decide on their own: under %s a month reachable through Google search = don't build as a search business; between %s and %s a month = a cheap test first at most; "
                "likely first-year sales under %s a month = a cheap test first at most. Market score: under %s a month 2/10, %s 4/10, %s 6/10, %s 8/10, %s or more 10/10.</p>"
                % (money(S.min_market_month), money(S.min_market_month), money(S.target_market_month), money(S.min_market_month),
@@ -626,7 +626,7 @@ def build_html(slug):
     # ================= PART 1: SCORECARD IN DETAIL =================
     sec[0] += 1
     H.append("<span class=num>PART 1</span><h2>The scorecard in detail</h2><p class=mute>The %s things that decide if this idea is worth %s, each out of 10.</p>"
-             % (str(len(scores)) if (first and scores) else "3" if first else "6" if quick else "7", "paying for real research" if first else "a deeper look" if quick else "building"))
+             % (str(len(scores)) if (first and scores) else "3" if first else "6" if quick else str(len(scores)) if scores else "7", "paying for real research" if first else "a deeper look" if quick else "building"))
     if scores:
         H.append(plain(("First-look score <b>%d out of 100</b>. Under 60 means the idea is weak as written. 60 or more means it is worth the paid research. The main score comes later." if first else
                         "Quick score <b>%d out of 100</b>. Under 55 means skip it. 55 to 69 means maybe. 70 or more means it is worth a full check." if quick else

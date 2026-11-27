@@ -673,6 +673,18 @@ class RevenueProof(unittest.TestCase):
         self.assertEqual((a["domain"], a["google_ads"]), ("", None))   # no own domain: Google ads are 'not checked', never zero
         self.assertFalse(any("adstransparency" in u for u in seen))
 
+    def test_proof_is_part_of_the_final_score(self):
+        from vm.blocks import gates
+        mk = lambda pr: type("C", (), {"read": staticmethod(lambda name, default=None: pr)})  # noqa: E731
+        comp = {"name": "Sticker Pro", "revenue_30d_usd": 42327, "closeness": 3, "price": "$199"}
+        self.assertIsNone(gates.proof_score(mk({"checked": False})))                        # not checked: no effect at all
+        self.assertEqual(gates.proof_score(mk({"checked": True, "comparables": []}))[0], 2)
+        self.assertEqual(gates.proof_score(mk({"checked": True, "comparables": [comp]}))[0], 5)
+        near = gates.proof_score(mk({"checked": True, "comparables": [comp | {"closeness": 2}]}))
+        self.assertEqual(near[0], 4)                                                          # a neighbouring niche counts one step lower
+        self.assertIn("neighbouring niche", near[1])
+        self.assertEqual(gates.proof_score(mk({"checked": True, "comparables": [comp | {"closeness": 1}]}))[0], 2)  # loosely alike is not proof
+
     def test_unchecked_is_never_reported_as_nothing_found(self):
         self.assertIn("not checked", self.proof.summary({"checked": False}))
         self.assertIn("no real business", self.proof.summary({"checked": True, "comparables": []}))

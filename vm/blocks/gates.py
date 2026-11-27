@@ -137,12 +137,36 @@ def gate3_scores(c):
         "costs": (5 if cost_share <= 0.05 else 4 if cost_share <= 0.10 else 3 if cost_share <= 0.20 else 2 if cost_share <= 0.40 else 1,
                   f"about ${fixed:.0f} a month to run the chosen offer (want under ${S.min_market_month * 0.05:,.0f} a month)"),
     }
+    ps = proof_score(c)
+    if ps:
+        s["proof"] = ps
     # geometric mean: one very low score pulls the whole result down instead of hiding behind the high ones
     prod = 1.0
     for v in s.values():
         prod *= max(v[0], 1)
     avg = round(prod ** (1 / len(s)), 2)
     return s, avg
+
+
+def proof_score(c):
+    """Do real businesses earn here? Scored from payment-verified revenue of comparable businesses (02_proof.json).
+    The other checks measure free Google search; this one is the evidence that the niche pays through ANY channel.
+    Returns None when the proof was not checked, so an unchecked idea is neither helped nor hurt."""
+    pr = c.read("02_proof.json", default=None)
+    if not pr or not pr.get("checked"):
+        return None
+    comps = [x for x in pr.get("comparables") or [] if x.get("closeness", 1) >= 2]
+    if not comps:
+        return 2, "no business with payment-verified revenue was found in this niche (the database only holds founders who chose to list)"
+    best = max(comps, key=lambda x: x["revenue_30d_usd"])
+    rev = best["revenue_30d_usd"]
+    sc = 5 if rev >= 30000 else 4 if rev >= 10000 else 3 if rev >= 5000 else 2 if rev >= 1000 else 1
+    same = best.get("closeness") == 3
+    if not same:   # the same kind of product in another niche is weaker proof than a business in this exact niche
+        sc = max(1, sc - 1)
+    return sc, (f"{best['name']} made ${rev:,.0f} in the last 30 days (payment-verified)" +
+                (", in this same niche" if same else ", selling the same kind of product in a neighbouring niche, so it counts one step lower") +
+                (f"; it charges {best['price'][:70]}" if best.get("price") else ""))
 
 
 def market_score(month):
