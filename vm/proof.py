@@ -96,6 +96,31 @@ def detail(slug):
     return d
 
 
+# ---------------- how far off the tools are (back-tested 2026-11-27) ----------------
+# Measured against businesses with payment-verified revenue and their own connected Google data (TrustMRR).
+# Re-measure with the back-test scripts when the data is refreshed; these are the numbers every estimate must carry.
+BACKTEST = {
+    "date": "2026-11-27",
+    "businesses": 2268,
+    # a keyword tool's "estimated Google visits" for a small site, against that site's real Google clicks (134 sites)
+    "tool_traffic_times_too_low": {"typical": 21, "low": 8, "high": 34},
+    # share of the search demand a site really gets on the searches it ranks for in the top 30 (25 sites)
+    "share_of_ranked_demand": {"typical": 0.12, "low": 0.05, "high": 0.18},
+    # hiding each business and predicting its revenue from everything knowable (tool numbers, age, buyer type, model)
+    "typical_miss_factor": 2.3,
+    # of businesses that earn $500+ in 30 days
+    "base": {"typical_usd": 2212, "upper_quarter_usd": 6894, "top_tenth_usd": 23918, "share_at_10k": 0.20,
+             "under_6_months": {"typical_usd": 1495, "share_at_10k": 0.15}, "over_4_years": {"typical_usd": 4227, "share_at_10k": 0.33},
+             "b2b": {"typical_usd": 2532, "share_at_10k": 0.21}, "b2c": {"typical_usd": 1601, "share_at_10k": 0.14}},
+}
+
+
+def honest_range(mid):
+    """A revenue figure is never one number: with everything knowable, the typical miss is about 2.3 times either way."""
+    f = BACKTEST["typical_miss_factor"]
+    return round(mid / f), round(mid), round(mid * f)
+
+
 # ---------------- what real sites earn per visitor ----------------
 def calibration(rs=None):
     """Earnings per visitor of real businesses, by traffic size. Small narrow sites earn dollars a visitor, big free tools cents."""

@@ -687,6 +687,11 @@ class RevenueProof(unittest.TestCase):
         self.assertIn("neighbouring niche", near[1])
         self.assertEqual(gates.proof_score(mk({"checked": True, "comparables": [comp | {"closeness": 1}]}))[0], 2)  # loosely alike is not proof
 
+    def test_a_money_figure_is_always_a_range(self):
+        lo, mid, hi = self.proof.honest_range(2300)
+        self.assertEqual((lo, mid, hi), (1000, 2300, 5290))
+        self.assertGreater(self.proof.BACKTEST["tool_traffic_times_too_low"]["typical"], 5)   # tool traffic is far too low for small sites
+
     def test_unchecked_is_never_reported_as_nothing_found(self):
         self.assertIn("not checked", self.proof.summary({"checked": False}))
         self.assertIn("no real business", self.proof.summary({"checked": True, "comparables": []}))

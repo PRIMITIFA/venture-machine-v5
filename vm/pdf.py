@@ -676,6 +676,15 @@ def build_html(slug):
             H.append("<h3>Do rivals buy ads?</h3><p class=small>From the two public ad libraries. A rival that keeps paying for ads is earning from them, and its buyers do not come from free search alone.</p>" +
                      table([{"n": a_["name"], "m": show(a_.get("meta_ads")), "g": show(a_.get("google_ads"))} for a_ in ads_], ["n", "m", "g"],
                            ["Rival", "Facebook / Instagram ads running", "Google ads"], right=("m", "g")))
+        from . import proof as _pf
+        bt_ = _pf.BACKTEST
+        H.append("<h3>How far to trust the numbers in this report</h3><p class=small>Back-tested on %s businesses with payment-verified revenue (%s). "
+                 "<b>A keyword tool's traffic estimate for a small site is typically %d times too low</b> against the site's real Google clicks (middle half %d to %d times). "
+                 "A site that ranks gets about %d%% of the search demand it ranks for, not all of it. "
+                 "Even using everything that can be known in advance, a revenue prediction is typically off by about %.1f times either way. "
+                 "Of businesses that earn at all, the typical one makes %s a month and %d%% reach $10,000 a month. So read every money figure here as a range, and trust the real businesses above over any formula.</p>"
+                 % ("{:,}".format(bt_["businesses"]), bt_["date"], bt_["tool_traffic_times_too_low"]["typical"], bt_["tool_traffic_times_too_low"]["low"], bt_["tool_traffic_times_too_low"]["high"],
+                    round(bt_["share_of_ranked_demand"]["typical"] * 100), bt_["typical_miss_factor"], money(bt_["base"]["typical_usd"]), round(bt_["base"]["share_at_10k"] * 100)))
         cal_ = [b_ for b_ in pr.get("calibration") or [] if "median" in b_]
         if cal_:
             H.append("<h3>What real sites earn per visitor</h3><p class=small>From %d businesses with verified revenue and visitor counts. Small sites with a narrow buyer and a real price earn dollars per visitor; "
