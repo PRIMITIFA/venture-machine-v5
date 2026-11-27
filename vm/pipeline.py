@@ -308,7 +308,7 @@ def _against(slug, v, gid, decision):
 
 # ---------------- out-of-date steps ----------------
 # bump a number when a block's rules change: every idea that ran the older version is then out of date from that block on
-BLOCK_VERSIONS = {"03": 2, "12": 3, "13": 3, "16": 3, "17": 3}
+BLOCK_VERSIONS = {"03": 2, "12": 4, "13": 3, "16": 3, "17": 3}
 # what each block reads from (a block is out of date when one of these was re-run or is itself out of date)
 DEPS = {"02": ["01"], "03": ["01", "02"], "04": ["01", "02", "03"], "05": ["04"], "06": ["01", "02"], "07": ["06"], "08": ["07"],
         "09": ["08"], "10": ["09"], "11": ["09", "02"], "12": ["08", "09", "11"], "13": ["08", "09"], "14": ["10", "11", "12", "13"],

@@ -266,7 +266,8 @@ class Pipeline(unittest.TestCase):
         self.assertNotIn(KWS[0], [r["keyword"] for r in clean])
         brand = [r for r in clean if r["keyword"] == KWS[1]][0]
         self.assertEqual(brand["intent"], "brand")                         # a rival's bare name: counted at 10%
-        full = sum(float(r["volume"]) for r in clean if r["intent"] in ("buy", "competitor", "brand-model"))
+        from vm.util import unique_searches
+        full = sum(float(r["volume"]) for r in unique_searches(clean) if r["intent"] in ("buy", "competitor", "brand-model"))
         self.assertAlmostEqual(buy_volume(clean), full + 0.1 * float(brand["volume"]), places=3)
         import json
         comps = json.loads((d / "11_top_competitors.json").read_text())
@@ -416,6 +417,24 @@ class Pipeline(unittest.TestCase):
 
 
 class Pure(unittest.TestCase):
+
+    def test_close_wordings_count_once(self):
+        """Google gives close wordings of one search the same volume and click price: they are the same people."""
+        from vm.util import buy_volume, unique_searches, volume_split
+        kws = [{"keyword": "concrete calculator", "volume": 450000, "cpc": 2.67, "intent": "buy", "kd": 42},
+               {"keyword": "calculator for concrete", "volume": 450000, "cpc": 2.67, "intent": "buy", "kd": 27},
+               {"keyword": "concrete measuring calculator", "volume": 450000, "cpc": 2.67, "intent": "buy", "kd": 0},
+               {"keyword": "gravel calculator", "volume": 60500, "cpc": 2.04, "intent": "buy", "kd": 11},
+               {"keyword": "rebar calculator", "volume": 90, "cpc": 0, "intent": "buy", "kd": 3},
+               {"keyword": "deck screw calculator", "volume": 90, "cpc": 0, "intent": "buy", "kd": 5},   # same volume, no price, other words: kept
+               {"keyword": "calculator rebar", "volume": 90, "cpc": 0, "intent": "buy", "kd": 9}]         # same words: merged
+        u = unique_searches(kws)
+        self.assertEqual(len(u), 4)
+        self.assertEqual(buy_volume(kws), 450000 + 60500 + 90 + 90)
+        self.assertEqual(volume_split(kws)["commercial"], 510680)
+        big = [k for k in u if k["volume"] == 450000][0]
+        self.assertEqual((big["keyword"], big["kd"], big["wordings"]), ("concrete calculator", 27, 3))
+
     def test_market_knockout_boundaries(self):
         from vm.blocks import gates
 

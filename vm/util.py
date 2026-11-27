@@ -97,20 +97,43 @@ def is_buy(k):
     return k.get("intent") in BUY_INTENTS
 
 
+def unique_searches(kws):
+    """One row per real search. Google reports the SAME monthly volume and click price for close wordings of one search
+    ('concrete calculator', 'calculator for concrete'): those are the same people, so they are counted once, not once per wording.
+    Rows with the same volume and the same non-zero click price are one search; rows with no click price are only merged
+    when they use the same words. The row kept is the shortest wording, with the lowest measured difficulty seen in the group."""
+    groups = {}
+    for k in kws:
+        vol, cpc = num(k.get("volume")), num(k.get("cpc"))
+        words = tuple(sorted(set(str(k.get("keyword", "")).lower().split())))
+        key = (vol, cpc, k.get("intent")) if cpc > 0 else (vol, 0.0, k.get("intent"), words)
+        groups.setdefault(key, []).append(k)
+    out = []
+    for g in groups.values():
+        best = dict(min(g, key=lambda k: len(str(k.get("keyword", "")))))
+        kds = [num(k.get("kd")) for k in g if k.get("kd") not in ("", None)]
+        if kds:  # a 0 usually means "not measured": prefer a measured difficulty when the group has one
+            best["kd"] = min([x for x in kds if x > 0] or kds)
+        best["wordings"] = len(g)
+        out.append(best)
+    return out
+
+
 def buy_volume(kws):
-    """Searches a month that count as buying demand: commercial searches in full, a rival's bare brand name at 10%."""
-    return sum(num(k.get("volume")) * INTENT_VOLUME_W.get(k.get("intent"), 0.0) for k in kws)
+    """Searches a month that count as buying demand: commercial searches in full, a rival's bare brand name at 10%.
+    Close wordings of one search are counted once (see unique_searches)."""
+    return sum(num(k.get("volume")) * INTENT_VOLUME_W.get(k.get("intent"), 0.0) for k in unique_searches(kws))
 
 
 def volume_split(kws):
     out = {"commercial": 0, "brand": 0, "info": 0}
-    for k in kws:
+    for k in unique_searches(kws):
         out["commercial" if is_buy(k) else "brand" if k.get("intent") == "brand" else "info"] += num(k.get("volume"))
     return {k: int(v) for k, v in out.items()}
 
 
 def weighted_cpc(kws):
     """Ad click price averaged by search volume over the commercial searches (a keyword with no price counts as $0)."""
-    buy = [k for k in kws if is_buy(k)]
+    buy = [k for k in unique_searches(kws) if is_buy(k)]
     vol = sum(num(k.get("volume")) for k in buy)
     return round(sum(num(k.get("cpc")) * num(k.get("volume")) for k in buy) / vol, 2) if vol else 0.0

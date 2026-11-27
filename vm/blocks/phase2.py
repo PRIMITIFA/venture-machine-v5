@@ -10,7 +10,7 @@ from .. import ai, seo
 from ..config import K, S
 from ..pipeline import Result
 from .. import store
-from ..util import BUY_INTENTS, buy_volume, domain_of, is_buy, num, pct_change, read_csv, volume_split, write_csv
+from ..util import BUY_INTENTS, buy_volume, domain_of, is_buy, num, pct_change, read_csv, volume_split, write_csv, unique_searches
 
 INTENT_W = {"buy": 1.5, "competitor": 1.3, "brand-model": 1.2, "brand": 0.4, "info": 0.6}
 INTENTS = Literal["buy", "competitor", "brand", "brand-model", "info"]
@@ -392,7 +392,7 @@ They rank on Google for our searches. Classify each one; judge by what the site 
         c.write("04_niche_pulse.json", pulse)
     top20 = clusters[:20]
     buy_clusters = sum(1 for cl in top20 if cl["intent"] in BUY_INTENTS)
-    buy_easy = sum(1 for r in rows if is_buy(r) and r["kd"] != "" and num(r["kd"]) <= 20)
+    buy_easy = sum(1 for r in unique_searches(rows) if is_buy(r) and r["kd"] != "" and num(r["kd"]) <= 20)  # close wordings count once
     hard_all = all(num(r["kd"]) >= 50 for r in rows if r["kd"] != "")
     summary = (f"{buy_clusters} buying clusters in top 20; {buy_easy} buying keywords KD<=20; "
                f"top competitors: {', '.join(x['domain'] for x in comps)}"
