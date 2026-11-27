@@ -117,8 +117,15 @@ def gate3_scores(c):
         return 1
     kd_dr = round((band(easy, (0.6, 0.4, 0.25, 0.1)) + (5 if min_dr < 20 else 4 if min_dr < 40 else 3 if min_dr < 60 else 2 if min_dr < 75 else 1)) / 2)
     # easy rankings are only worth something if people search: a small niche cannot score top marks for being empty
-    small = buy_vol < 300
-    rank_cap = 3 if small else 4 if buy_vol < 1000 else 5
+    # counted buyers (official yearly figure x a newcomer's share x price) stand beside search, because keyword tools undercount small niches.
+    # A score from counted buyers tops out at 4: the share is an assumption, and crowded niches give a newcomer less.
+    pr_ = c.read("02_proof.json", default=None) or {}
+    buyers = num((pr_.get("buyer_count") or {}).get("figure"))
+    ppl = c.v["data"].get("people_newcomer_month") or None
+    ppl_demand = min(band(buyers, (50000, 20000, 5000, 1000)), 4) if buyers else 0
+    ppl_market = min(market_score(ppl[1]), 4) if ppl else 0
+    small = buy_vol < 300 and ppl_demand < 3
+    rank_cap = 3 if small else 4 if buy_vol < 1000 and ppl_demand < 4 else 5
     kd_note = "" if kd_dr <= rank_cap else " Capped: easy to rank, but only %s buying searches a month, so the prize is small." % "{:,}".format(int(buy_vol))
     value = band(w_cpc, (5, 3, 2, 1))
     value_note = f"advertisers pay about ${w_cpc:.2f} per click on average across the buying searches (want $2+; the single highest is ${max_cpc:.2f})"
@@ -126,11 +133,19 @@ def gate3_scores(c):
         value, value_note = 3, value_note + ". Capped: no advertiser was seen on any of these searches, so the click price is not proven."
     adv_reason = (c.v["data"].get("advantage_reason") or "").strip()
     weak_s = min(band(weak, (0.5, 0.3, 0.2, 0.1)), 4 if small else 5)
+    d_search = band(buy_vol, (5000, 2000, 1000, 300))
+    d_note = f"{int(buy_vol):,} buying searches a month (want 1,000+): {sp['commercial']:,} commercial, plus 10% of {sp['brand']:,} searches for a rival's name; {sp['info']:,} learning searches not counted"
+    if ppl_demand > d_search:
+        d_note = f"{int(buyers):,} people a year face this need ({(pr_['buyer_count'].get('source_name') or 'source in the report')[:60]}), scored on that count because search shows only {int(buy_vol):,} buying searches a month"
+    m_search = market_score(month)
+    m_note = f"about ${month:,.0f} a month is reachable through Google search. We want ${target:,.0f}+ a month, and under ${S.min_market_month:,.0f} is too small"
+    if ppl_market > m_search:
+        m_note = (f"counting the buyers gives a newcomer about ${ppl[1]:,.0f} a month (${ppl[0]:,.0f} to ${ppl[2]:,.0f}; the share is an assumption). "
+                  f"Google search alone shows about ${month:,.0f} a month")
     s = {
-        "demand": (band(buy_vol, (5000, 2000, 1000, 300)),
-                   f"{int(buy_vol):,} buying searches a month (want 1,000+): {sp['commercial']:,} commercial, plus 10% of {sp['brand']:,} searches for a rival's name; {sp['info']:,} learning searches not counted"),
+        "demand": (max(d_search, ppl_demand), d_note),
         "value": (value, value_note),
-        "market": (market_score(month), f"about ${month:,.0f} a month is reachable through Google search. We want ${target:,.0f}+ a month, and under ${S.min_market_month:,.0f} is too small"),
+        "market": (max(m_search, ppl_market), m_note),
         "kd_dr": (min(kd_dr, rank_cap), f"{easy:.0%} of the best searches are easy to rank for; weakest direct rival has strength {min_dr:.0f}/100.{kd_note}"),
         "weak_spots": (weak_s, f"rivals are weak on {weak:.0%} of the page topics"),
         "advantage": (int(c.v["data"].get("advantage_score") or 3), adv_reason[:200] or "how much better we can be than the rivals (AI judgement)"),
