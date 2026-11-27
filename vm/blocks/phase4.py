@@ -396,7 +396,7 @@ THE CHOSEN OFFER (fixed): {offer_line(offer) if offer else 'see the business cas
 2) Sitemap: home page on the strongest BUYING search, 1 page = 1 cluster (use cluster_id), money page on the strongest buying
 intent. Plan at least 20 pages (or one per cluster if fewer). EVERY page needs its own unique data source - pages that only
 swap the keyword in a template are not allowed.
-3) One link-bait asset and the AI-search plan. 4) Rate our edge 1-5 and give the reason as facts (price, data, speed, channel), not opinion.
+3) One link-bait asset and the AI-search plan. 4) Rate our edge 1-5 and give the reason as facts (price, data, speed, channel, and design or ease of use where the rival audit of block 10 measured the rivals as dated, slow or hard to buy from; the owner's assets in the house rules count), not opinion. The edge is only about how we compare with the rivals' product and site: do not count market size, search volume or being a new domain against it, those are scored in their own checks.
 RULES: sell only the chosen offer at its price, in USD (never euros). One main keyword belongs to ONE page only; a page
 without its own cluster must say "support page, no target keyword" as its data source and does not count toward the 20.
 The home page and the money page must target clusters with intent buy / competitor / brand-model, never an 'info' or 'brand' cluster.
