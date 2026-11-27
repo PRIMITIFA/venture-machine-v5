@@ -7,6 +7,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from .. import ai, seo, store, web
+from ..config import S
 from ..pipeline import Result
 from ..util import pct_change
 
@@ -283,15 +284,39 @@ and a 3-line summary. Also name the ONE other angle that could work better (a di
 way to charge), written as a full new idea sentence, so it can be tested on its own if this idea scores under 6.
 In the summary and reasons use plain words; never write "ICE" or score shorthand like "3/2/4".{c.note()}""",
         Scorecard, smart=True, context=ctx)
-    avg = round((out.ice.impact + out.ice.confidence + out.ice.ease) / 3, 2)
-    d = out.model_dump() | {"ice_avg": avg}
+    d = out.model_dump()
+    avg = first_avg(d["ice"])
+    d["ice_avg"] = avg
     c.write("05_scorecard.json", d)
     store.set_data(c.slug, ice_avg=avg, mvp_days=out.effort.days_to_mvp, first_score100=round(avg * 10),
                    other_angle=out.other_angle.model_dump() if out.other_angle else None)
-    summary = f"ICE {avg} (I{out.ice.impact} C{out.ice.confidence} E{out.ice.ease}); MVP {out.effort.days_to_mvp} d; blockers: {', '.join(out.blockers) or 'none'}"
-    if out.blockers or out.effort.days_to_mvp > 30:
-        return Result("kill", summary)
-    if avg >= 6.0 and out.effort.days_to_mvp <= 14:
-        return Result("pass", summary)
-    return Result("warn", summary + " (below the pass bar: ICE >= 6 and MVP <= 14 d)"
-                  + ("; another angle could work, see gate 1" if out.other_angle else ""))
+    verdict, summary = first_result(d)
+    return Result(verdict, summary)
+
+
+def first_keys():
+    """What the first-look score is made of. Build effort only counts when VM_COUNT_BUILD_EFFORT=1."""
+    return ("impact", "confidence", "ease") if S.count_build_effort else ("impact", "confidence")
+
+
+def first_avg(ice):
+    ks = first_keys()
+    return round(sum(ice[k] for k in ks) / len(ks), 2)
+
+
+def first_result(sc):
+    """Verdict and one-line result of step 04 from the stored scorecard (pure arithmetic, so it can be rebuilt any time)."""
+    ice, days, blockers = sc["ice"], sc["effort"]["days_to_mvp"], sc.get("blockers") or []
+    avg = first_avg(ice)
+    if S.count_build_effort:
+        summary = f"ICE {avg} (I{ice['impact']} C{ice['confidence']} E{ice['ease']}); MVP {days} d; blockers: {', '.join(blockers) or 'none'}"
+        bar, ok, dead = "ICE >= 6 and MVP <= 14 d", avg >= 6.0 and days <= 14, bool(blockers) or days > 30
+    else:
+        summary = (f"first look {avg} of 10 (money {ice['impact']}, how sure {ice['confidence']}); build about {days} d, not counted; "
+                   f"blockers: {', '.join(blockers) or 'none'}")
+        bar, ok, dead = "first look >= 6", avg >= 6.0, bool(blockers)
+    if dead:
+        return "kill", summary
+    if ok:
+        return "pass", summary
+    return "warn", summary + f" (below the pass bar: {bar})" + ("; another angle could work, see gate 1" if sc.get("other_angle") else "")

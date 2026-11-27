@@ -14,7 +14,13 @@ def _spent(c):
     return f"spent so far ${store.spent(c.slug):.2f} of ${cap_usd(c.v['data'].get('depth', 'full')):.2f}"
 
 
-FIRST_QUESTIONS = {"impact": "How much money could it make?", "confidence": "How sure are we it will work?", "ease": "How easy is it to build and sell?"}
+_FIRST_ALL = {"impact": "How much money could it make?", "confidence": "How sure are we it will work?", "ease": "How easy is it to build and sell?"}
+
+
+def first_questions():
+    """The first-look questions that count. Build effort is left out unless VM_COUNT_BUILD_EFFORT=1."""
+    from .phase1 import first_keys
+    return {k: _FIRST_ALL[k] for k in first_keys()}
 FIRST_PASS = 60  # first-look score out of 100; under this the idea is weak as written
 
 
@@ -26,7 +32,7 @@ def first_scores(c):
     ice = sc["ice"]
     fallback = {"impact": "how big the win could be (AI judgement from what phase 1 found)",
                 "confidence": "how sure the evidence makes us (AI judgement)", "ease": "how easy it is to build and to sell (AI judgement)"}
-    s = {k: (ice[k] / 2, (ice.get(k + "_why") or fallback[k])[:220]) for k in ("impact", "confidence", "ease")}
+    s = {k: (ice[k] / 2, (ice.get(k + "_why") or fallback[k])[:220]) for k in first_questions()}
     return s, round(sum(v[0] for v in s.values()) / len(s), 2)
 
 
@@ -46,14 +52,15 @@ def memo1(c):
     ang = sc.get("other_angle")
     head = [f"First-look score {score}/100 -> " + ("GOOD ENOUGH: worth the paid research" if score >= FIRST_PASS else
                                                     "WEAK as written" + (": test the other angle" if ang else ""))]
-    head += [f"  {FIRST_QUESTIONS[k]:34} {sc['ice'][k]:>2}/10  {sc['ice'].get(k + '_why', '')}".rstrip() for k in FIRST_QUESTIONS]
+    fq = first_questions()
+    head += [f"  {fq[k]:34} {sc['ice'][k]:>2}/10  {sc['ice'].get(k + '_why', '')}".rstrip() for k in fq]
     if ang:
         head += ["Other angle that could work: " + ang["idea"], "  Why: " + ang["why"], "  Cheapest test: " + ang["cheapest_test"],
                  f"  Check it (about 1 cent): vm gate {c.slug} angle"]
     if c.v["data"].get("angle_of"):
         head.append(f"This idea is the other angle of '{c.v['data']['angle_of']}' (that one scored {c.v['data'].get('parent_score100', '?')}/100).")
     lines = head + sc["summary_3_lines"] + [
-        f"ICE {sc['ice_avg']} | MVP {sc['effort']['days_to_mvp']} days | ~${sc['effort']['monthly_cost_usd']}/mo | blockers: {', '.join(sc['blockers']) or 'none'}",
+        f"First look {sc['ice_avg']} of 10 | build about {sc['effort']['days_to_mvp']} days{'' if S.count_build_effort else ' (not counted)'} | ~${sc['effort']['monthly_cost_usd']}/mo | blockers: {', '.join(sc['blockers']) or 'none'}",
         f"E-E-A-T {eeat_ok}/4 ok, YMYL {e['ymyl_level']} | niche {n['status']} (" + (f"24-mo trend {n['change_24m_pct_best']}%" if n.get('change_24m_pct_best') is not None else "not enough search history for a trend") + ")",
         f"Biggest unknown: {sc['biggest_unknown']}", _spent(c)]
     return Result("pass", "\n".join(lines))
@@ -314,7 +321,7 @@ def light_scores(c):
                    f"{len(priced)} sites already charge money for this"),
         "rank": (band(easy, (0.6, 0.4, 0.25, 0.1)), f"{easy:.0%} of the top searches have easy or medium difficulty (30 or less)"),
         "alive": (alive, f"niche is {pulse.get('status', 'unknown')}" + (f", searches {ch:+.0f}% in 2 years" if ch is not None else "")),
-        "effort": (max(1, min(5, round(ice / 2))), f"quick gut-check (ICE) {ice}/10, first version in {(sc.get('effort') or {}).get('days_to_mvp', '?')} days"),
+        "effort": (max(1, min(5, round(ice / 2))), f"first-look score {ice}/10" + (f", first version in {(sc.get('effort') or {}).get('days_to_mvp', '?')} days" if S.count_build_effort else " (build time not counted)")),
     }
     avg = round(sum(v[0] for v in s.values()) / len(s), 2)
     return s, avg

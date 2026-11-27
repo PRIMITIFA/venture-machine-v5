@@ -156,7 +156,7 @@ The state (blocks, gate decisions, the money ledger and the cache) is kept in `d
 Every block has its own pass/kill test from the spec, for example:
 - 02: a competitor must already be charging money.
 - 03: a trend down more than 30% in 24 months with no ads and quiet forums is a kill.
-- 04: ICE must be ≥ 6 and the MVP ≤ 14 days.
+- 04: the first-look score (money + how sure, each out of 10, averaged) must be ≥ 6. How long the idea takes to build is shown but never counts against it (set `VM_COUNT_BUILD_EFFORT=1` to count it again).
 - 07: buying-intent volume ≥ 1,000/mo or CPC ≥ $2.
 
 The full list is in [docs/BLOCKS.md](docs/BLOCKS.md).

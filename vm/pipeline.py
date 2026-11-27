@@ -357,7 +357,7 @@ def refresh(slug):
 
 
 def resync(slug):
-    """Rebuild the one-line results that are pure arithmetic on stored files (steps 03 and 07), so they cannot lag behind the data."""
+    """Rebuild the one-line results that are pure arithmetic on stored files (steps 03, 04 and 07), so they cannot lag behind the data or the rules."""
     import re
     from .blocks import phase1, phase2
     c = Ctx(slug)
@@ -368,6 +368,16 @@ def resync(slug):
         new = re.sub(r"^(alive|flat|dying|unknown); 24-month trend [^;]*", lambda m: phase1.pulse_line(c.read("04_niche_pulse.json")), st.get("summary") or "")
         if new != st.get("summary"):
             store.set_block(slug, "03", summary=new)
+    st = store.block(slug, "04")
+    if st["status"] == "VALIDATED" and c.has("05_scorecard.json"):
+        sc = c.read("05_scorecard.json")
+        avg = phase1.first_avg(sc["ice"])
+        verdict, summary = phase1.first_result(sc)
+        if avg != sc.get("ice_avg"):
+            c.write("05_scorecard.json", sc | {"ice_avg": avg})
+            store.set_data(slug, ice_avg=avg, first_score100=round(avg * 10))
+        if verdict != "kill" and (summary != st.get("summary") or verdict != st.get("verdict")):
+            store.set_block(slug, "04", summary=summary, verdict=verdict)
 
 
 def try_angle(slug, note=""):

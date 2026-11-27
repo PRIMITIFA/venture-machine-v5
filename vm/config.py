@@ -106,6 +106,11 @@ class Settings:
         return _f("VM_GOOD_CASE_SHARE", 0.35)
 
     @property
+    def count_build_effort(self):
+        """False (default): how long or hard an idea is to BUILD never counts against it; the first-look score is money + certainty only."""
+        return os.environ.get("VM_COUNT_BUILD_EFFORT", "0").strip().lower() in ("1", "true", "yes")
+
+    @property
     def assumed_conversion(self):
         return _f("VM_ASSUMED_CONVERSION", 0.01)
 

@@ -229,12 +229,12 @@ class Pipeline(unittest.TestCase):
         finally:
             ai.FAKE = fake_ai
         v = store.venture(slug)
-        self.assertEqual(v["data"]["first_score100"], 33)
-        self.assertIn("First-look score 33/100", said[-1])
+        self.assertEqual(v["data"]["first_score100"], 30)
+        self.assertIn("First-look score 30/100", said[-1])
         self.assertIn(f"vm gate {slug} angle", said[-1])
         from vm import pdf
         h = pdf.build_html(slug)
-        for part in ("WEAK AS IT IS: TRY THE OTHER ANGLE", "ANOTHER ANGLE THAT COULD WORK", "Car dealers want bulk", "First look", "33/100", "not yet"):
+        for part in ("WEAK AS IT IS: TRY THE OTHER ANGLE", "ANOTHER ANGLE THAT COULD WORK", "Car dealers want bulk", "First look", "30/100", "not yet"):
             self.assertIn(part, h)
         msg = pipeline.gate(slug, "angle")
         child = store.venture(slug)["data"]["angle_slug"]
@@ -243,7 +243,7 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(store.venture(child)["data"]["angle_of"], slug)
         self.assertIn("Car dealers", store.venture(child)["idea"])
         self.assertEqual(pipeline.run(child, say=lambda m: None), "gate_05")  # not killed as a duplicate of its parent
-        self.assertEqual(store.venture(child)["data"]["first_score100"], 70)
+        self.assertEqual(store.venture(child)["data"]["first_score100"], 65)
         h2 = pdf.build_html(child)
         self.assertIn("This is the other angle", h2)
         self.assertIn("GOOD FIRST LOOK", h2)
@@ -285,7 +285,7 @@ class Pipeline(unittest.TestCase):
             ai.FAKE = fake_ai
         pipeline.gate(slug, "go", "I want the numbers anyway")
         g = store.gates(slug)[-1]
-        self.assertTrue(g["note"].startswith("OVERRIDE: GO although the first-look score was WEAK (33/100)"), g["note"])
+        self.assertTrue(g["note"].startswith("OVERRIDE: GO although the first-look score was WEAK (30/100)"), g["note"])
         self.assertIn("I want the numbers anyway", g["note"])
         from vm import pdf
         self.assertIn("GO although the first-look score was WEAK", pdf.build_html(slug))
@@ -400,6 +400,19 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(pipeline.run(b, say=lambda m: None), "kill_recommended")
         pipeline.gate(b, "kill")
         self.assertEqual(store.venture(b)["status"], "killed")
+
+
+    def test_stored_idea_is_rescored(self):
+        slug = pipeline.new("Aquarium water test log app for reef tank hobbyists who pay monthly", country="us")
+        pipeline.run(slug, say=lambda m: None)
+        c = pipeline.Ctx(slug)
+        sc = c.read("05_scorecard.json")
+        c.write("05_scorecard.json", sc | {"ice_avg": 7.0})
+        store.set_data(slug, ice_avg=7.0, first_score100=70)
+        store.set_block(slug, "04", summary="ICE 7.0 (I7 C6 E8); MVP 7 d; blockers: none")
+        pipeline.resync(slug)
+        self.assertEqual(store.venture(slug)["data"]["first_score100"], 65)
+        self.assertIn("not counted", store.block(slug, "04")["summary"])
 
 
 class Pure(unittest.TestCase):
@@ -523,6 +536,25 @@ class Pure(unittest.TestCase):
         self.assertEqual(e["max_cac"], 49.8)
         self.assertEqual(e["breakeven_cpc"], 1.0)
         self.assertEqual(e["paid_search_cac"], 50.0)
+
+
+class BuildEffortNotCounted(unittest.TestCase):
+    """Owner rule 2026-11-27: how long an idea takes to build never counts against it."""
+
+    def test_first_look_ignores_build_effort(self):
+        from vm.blocks import phase1
+        sc = {"ice": {"impact": 8, "confidence": 6, "ease": 1}, "effort": {"days_to_mvp": 90}, "blockers": [], "other_angle": None}
+        self.assertEqual(phase1.first_avg(sc["ice"]), 7.0)
+        verdict, line = phase1.first_result(sc)
+        self.assertEqual(verdict, "pass")  # 90 days to build and ease 1 do not stop it
+        self.assertIn("not counted", line)
+        self.assertEqual(phase1.first_result(sc | {"blockers": ["illegal"]})[0], "kill")  # hard blockers still stop it
+        os.environ["VM_COUNT_BUILD_EFFORT"] = "1"
+        try:
+            self.assertEqual(phase1.first_avg(sc["ice"]), 5.0)
+            self.assertEqual(phase1.first_result(sc)[0], "kill")  # old rule: over 30 days
+        finally:
+            del os.environ["VM_COUNT_BUILD_EFFORT"]
 
 
 if __name__ == "__main__":

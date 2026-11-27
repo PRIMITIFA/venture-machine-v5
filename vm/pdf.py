@@ -89,7 +89,7 @@ GLOSSARY = [
     ("SERP", "The Google results page for a search."),
     ("Cluster", "A group of searches that Google answers with the same pages. One cluster = one page to build."),
     ("Buying intent", "A search from someone ready to pay (\"passport photo online\"), not just curious (\"what size is a passport photo\")."),
-    ("First-look score", "The phase 1 score: how big the win could be, how sure we are, and how easy it is, each out of 10, averaged and shown out of 100 (also called ICE). 60+ is good."),
+    ("First-look score", "The phase 1 score: how big the win could be and how sure we are, each out of 10, averaged and shown out of 100. 60+ is good. How long it takes to build is shown but does not count."),
     ("MVP", "Minimum viable product: the simplest version people can pay for."),
     ("CAC (customer acquisition cost)", "What it costs to win one paying customer (ads, emails, time)."),
     ("Max CAC", "The most you can spend to win a customer and still not lose money."),
@@ -377,9 +377,9 @@ def build_html(slug):
         scores, avg = None, None
     first = False  # True = only the first-look (phase 1) score exists so far
     if not scores and not quick and sc:
-        from .blocks.gates import first_scores, FIRST_QUESTIONS
+        from .blocks.gates import first_scores, first_questions
         scores, avg = first_scores(Ctx(slug))
-        QMAP, first = FIRST_QUESTIONS, bool(scores)
+        QMAP, first = first_questions(), bool(scores)
     angle = data.get("other_angle") if (data.get("other_angle") or {}).get("idea") else None
     kid = None
     first100 = data.get("first_score100")
@@ -620,7 +620,7 @@ def build_html(slug):
     # ================= PART 1: SCORECARD IN DETAIL =================
     sec[0] += 1
     H.append("<span class=num>PART 1</span><h2>The scorecard in detail</h2><p class=mute>The %s things that decide if this idea is worth %s, each out of 10.</p>"
-             % ("3" if first else "6" if quick else "7", "paying for real research" if first else "a deeper look" if quick else "building"))
+             % (str(len(scores)) if (first and scores) else "3" if first else "6" if quick else "7", "paying for real research" if first else "a deeper look" if quick else "building"))
     if scores:
         H.append(plain(("First-look score <b>%d out of 100</b>. Under 60 means the idea is weak as written. 60 or more means it is worth the paid research. The main score comes later." if first else
                         "Quick score <b>%d out of 100</b>. Under 55 means skip it. 55 to 69 means maybe. 70 or more means it is worth a full check." if quick else
