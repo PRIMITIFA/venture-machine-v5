@@ -184,7 +184,7 @@ DEPTHS = {
     "light": {"label": "Quick check", "about": "about 5 minutes, about $0.20 of data", "cap_env": "VM_LIGHT_MAX_USD", "cap": 0.5,
               "max_serps": 10, "serp_depth": 10, "suggest_seeds": 1, "suggest_limit": 20},
     "full": {"label": "Full check", "about": "about 30 minutes, about $2-3 of data", "cap_env": "VM_MAX_USD_PER_IDEA", "cap": 5.0,
-             "max_serps": 60, "serp_depth": 20, "suggest_seeds": 3, "suggest_limit": 40, "ai_prompts": 4,
+             "max_serps": 60, "serp_depth": 20, "suggest_seeds": 8, "suggest_limit": 100, "ai_prompts": 4,
              "history_rivals": 3, "gap_rivals": 3, "ref_limit": 300, "extra_countries": []},
     "deep": {"label": "Deep check", "about": "about 45 minutes, about $4-7 of data", "cap_env": "VM_DEEP_MAX_USD", "cap": 10.0,
              "max_serps": 120, "serp_depth": 20, "suggest_seeds": 6, "suggest_limit": 60, "ai_prompts": 8,

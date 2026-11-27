@@ -283,7 +283,12 @@ Competitors already known: {[x['url'] for x in how['competitors']]}{c.note()}"""
 def pulse_line(pulse):
     """Status and what it rests on, from the stored numbers (so the result line never says 'alive' without naming the signal)."""
     best, kwt = pulse.get("change_24m_pct_best"), pulse.get("kw_trend_12m_pct")
+    n_terms = sum(1 for x in (pulse.get("trend") or {}).values() if x.get("change_24m_pct") is not None)
     line = f"{pulse['status']}; 24-month trend " + (f"{best}%" if best is not None else "no data")
+    if best is not None and n_terms <= 1:
+        line += " (ONE wording only on Google Trends, not the niche)"
+    if kwt is not None and not pulse.get("status_source"):
+        line += f"; our own searches over 12 months {kwt:+.1f}%"
     if pulse.get("status_source"):
         line += f" (status rests on one measured signal: {pulse['status_source']}, {kwt:+.1f}%)"
     return line
@@ -331,6 +336,10 @@ def b04_ice(c):
     ctx = {"intake": c.read("01_intake.md"), "how": c.read("02_how_analysis.json"),
            "eeat": c.read("03_eeat_quality.json"), "niche": c.read("04_niche_pulse.json"),
            "revenue_proof": c.read("02_proof.json", default={"checked": False})}
+    tr_ = (ctx["niche"] or {}).get("trend") or {}
+    if sum(1 for x in tr_.values() if x.get("change_24m_pct") is not None) <= 1:
+        ctx["niche"] = dict(ctx["niche"], trend_warning="The 24-month trend comes from ONE search wording only. It says nothing about the niche as a whole: "
+                            "do not write that the niche or 'the main search term' is shrinking or growing because of it, and do not use it as an argument.")
     out = ai.ask_json(
         f"""Block 04. Score this idea. Give exactly 5 arguments FOR and 5 AGAINST, the single biggest unknown, the effort
 (days to a working MVP built with an AI coding agent, monthly running cost, API dependencies, owner hours/week),

@@ -30,6 +30,11 @@ class Seed(BaseModel):
 
 class Seeds(BaseModel):
     seeds: list[Seed]
+    tracks: list[str] = Field(default=[], description="EVERY separate version of the thing a buyer could name, 2-4 words each, lowercase: each exam or product type, "
+                              "each sibling trade or subject, each common level naming. Example for a water plant operator exam: 'water treatment', 'water distribution', "
+                              "'wastewater', 'wastewater collection', 'water operator', 'wastewater operator'. 3-15 items. Do not stop at the one the idea text names")
+    wordings: list[str] = Field(default=[], description="the 8-16 short ways buyers word the need, lowercase, without the track: e.g. 'practice test', 'practice exam', "
+                                "'exam', 'exam prep', 'study guide', 'test', 'exam questions', 'practice questions', 'certification', 'license', 'course', 'math'")
 
 
 def b06_seeds(c):
@@ -39,7 +44,9 @@ def b06_seeds(c):
 {c.v['one_liner']}
 Expand the key terms {c.v['data'].get('key_terms')} with synonyms, slang, brand/model names, modifiers
 ("free", "cost", "price", "near me", "alternative", "vs", "online", "check", "report") and competitor names.
-Cover buying words, product names, brands and competitors. Language: {c.lang}. Country: {c.v['country']}.{c.note()}""",
+Cover buying words, product names, brands and competitors.
+Also fill "tracks" and "wordings": the machine multiplies them into a wide grid of searches, because a narrow seed list
+hides most of the demand (one idea was measured at 94 buying searches a month from a narrow list and 5,700 from a wide one). Language: {c.lang}. Country: {c.v['country']}.{c.note()}""",
         Seeds, smart=False, context={"competitors": [x["name"] for x in how["competitors"]],
                                      "rising_synonyms": pulse.get("rising_synonyms"), "key_terms": c.v["data"].get("key_terms")})
     seen, rows = set(), []
@@ -48,13 +55,22 @@ Cover buying words, product names, brands and competitors. Language: {c.lang}. C
         if k and k not in seen:
             seen.add(k)
             rows.append({"seed_keyword": k, "category": s.category, "source": s.source})
+    hand = len(rows)
+    # the wide grid: every track x every wording (one volume lookup takes 1,000 keywords, so width costs almost nothing)
+    for t in out.tracks[:15]:
+        for w in out.wordings[:16]:
+            for k in (seo.clean_kw(f"{t} {w}"),):
+                if k and k not in seen and len(rows) < 600:
+                    seen.add(k)
+                    rows.append({"seed_keyword": k, "category": "buy", "source": "grid: track x wording"})
     write_csv(c.path("06_seeds.csv"), rows, ["seed_keyword", "category", "source"])
-    n, buy = len(rows), sum(r["category"] in ("buy", "competitor", "product", "brand-model") for r in rows)
+    n, buy = hand, sum(r["category"] in ("buy", "competitor", "product", "brand-model") for r in rows[:hand])
+    grid_note = f" + {len(rows) - hand} grid wordings ({len(out.tracks[:15])} tracks x {len(out.wordings[:16])} wordings)" if len(rows) > hand else ""
     if n < 30 or n > 60:
         return Result("redo", f"{n} seeds; need 30-60")
     if buy < 8:
         return Result("redo", f"only {buy} buying/product/competitor seeds; need more buying words")
-    return Result("pass", f"{n} seeds ({buy} buying/product/competitor)")
+    return Result("pass", f"{n} seeds ({buy} buying/product/competitor){grid_note}")
 
 
 # ---------------- 07 Volume, CPC, cleaning ----------------
