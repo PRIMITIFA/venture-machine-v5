@@ -87,6 +87,11 @@ def memo2(c):
     return Result("pass", "\n".join(lines))
 
 
+# How much each check counts in the final score. Money questions (are there buyers, is the market big enough, do real businesses
+# earn here) count three times; what a buyer is worth, ranking and our edge twice; rivals' weak spots and running cost once.
+WEIGHTS = {"demand": 3, "market": 3, "proof": 3, "value": 2, "kd_dr": 2, "advantage": 2, "weak_spots": 1, "costs": 1}
+
+
 def gate3_scores(c):
     kws = read_csv(c.path("08_keywords_clean.csv"))
     buy = [k for k in kws if is_buy(k)]
@@ -162,10 +167,12 @@ def gate3_scores(c):
     if ps:
         s["proof"] = ps
     # geometric mean: one very low score pulls the whole result down instead of hiding behind the high ones
-    prod = 1.0
-    for v in s.values():
-        prod *= max(v[0], 1)
-    avg = round(prod ** (1 / len(s)), 2)
+    prod, wsum = 1.0, 0
+    for k, v in s.items():
+        w = WEIGHTS.get(k, 1)
+        prod *= max(v[0], 1) ** w
+        wsum += w
+    avg = round(prod ** (1 / wsum), 2)
     return s, avg
 
 

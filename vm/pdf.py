@@ -317,7 +317,7 @@ def answer_of(v, data, n_done):
 
 
 def build_html(slug):
-    from .blocks.gates import gate3_scores
+    from .blocks.gates import gate3_scores, WEIGHTS as _W
     from .pipeline import Ctx
     v = store.venture(slug)
     d = S.ventures_dir / slug
@@ -490,7 +490,10 @@ def build_html(slug):
                        if split["brand"] else "{:,} searches a month from people ready to buy".format(buy_vol), *verdict(buy_vol >= 1000, buy_vol >= 300)))
         from .util import weighted_cpc
         wc_ = weighted_cpc(kws or [])
-        glance.append(("Ad click price", "advertisers pay about %s per click on average across the buying searches (highest single one %s)" % (money(wc_), money(top_cpc)), *verdict(wc_ >= 2, wc_ >= 1)))
+        known_price = bool((pr0.get("people") or {}).get("price_usd"))   # then the real price decides, and the click price is a side note
+        glance.append(("Ad click price", "advertisers pay about %s per click on average across the buying searches (highest single one %s)%s" % (
+            money(wc_), money(top_cpc), "; a side note here, because we know what buyers really pay" if known_price else ""),
+            *(("side note", "#71717a") if known_price and wc_ < 2 else verdict(wc_ >= 2, wc_ >= 1))))
     if pp0.get("price_usd"):
         glance.append(("What a buyer pays", "one customer pays the leading rival about %s" % money(pp0["price_usd"]), *verdict(pp0["price_usd"] >= 150, pp0["price_usd"] >= 50)))
     pr_ = jf("02_proof.json")
@@ -631,7 +634,7 @@ def build_html(slug):
                "This is an early judgement from what the AI found on the web, before any Google numbers. The main score (7 or 8 checks) replaces it after the full research.</p>" if first else
                "<p class='small mute'>Quick score = the average of the 6, out of 100. Under 55: skip it. 55-69: maybe. 70 or more: worth a full check. "
                "A quick check does not look at rivals, AI assistants, market size or money yet.</p>" if quick else
-               "<p class='small mute'>Overall score = all the checks combined so that one very low score pulls the whole result down, out of 100. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build. "
+               "<p class='small mute'>Overall score = all the checks combined so that one very low score pulls the whole result down, out of 100. The checks do not count equally: buyers, market size and real revenue count 3 times; buyer value, getting onto Google and our edge 2 times; rivals' weak spots and running cost once. Under 60: don't build. 60-69: test it cheaply first. 70 or more: build. "
                "Rules that decide on their own: under %s a month reachable through Google search = don't build as a search business; between %s and %s a month = a cheap test first at most; "
                "likely first-year sales under %s a month = a cheap test first at most. Market score: under %s a month 2/10, %s 4/10, %s 6/10, %s 8/10, %s or more 10/10.</p>"
                % (money(S.min_market_month), money(S.min_market_month), money(S.target_market_month), money(S.min_market_month),
@@ -697,7 +700,7 @@ def build_html(slug):
         for k, (val, why_) in scores.items():
             col = GOOD if val >= 4 else CARE if val >= 3 else BAD
             H.append("<div class=score><div class=q>%s</div><div class=bar><i style='width:%d%%;background:%s'></i></div><div><b>%d</b>/10</div><div class=why>%s</div></div>"
-                     % (e(QMAP.get(k, k)), val * 20, col, val * 2, e(why_)))
+                     % (e(QMAP.get(k, k)), val * 20, col, val * 2, e((("Counts %d times in the overall score. " % _W[k]) if main_done and _W.get(k, 1) > 1 else "") + why_)))
     else:
         H.append(plain("The scores appear once all research steps are done (step 18). So far %d of 18 steps are done." % n_done))
     if scores and not first and not quick and first100 is not None:
