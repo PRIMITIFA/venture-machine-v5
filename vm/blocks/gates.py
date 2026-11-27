@@ -131,6 +131,12 @@ def gate3_scores(c):
     value_note = f"advertisers pay about ${w_cpc:.2f} per click on average across the buying searches (want $2+; the single highest is ${max_cpc:.2f})"
     if value > 3 and not ads_seen:
         value, value_note = 3, value_note + ". Capped: no advertiser was seen on any of these searches, so the click price is not proven."
+    # the click price only shows what advertisers bid; where rivals do not buy search ads it says nothing about what a buyer pays.
+    # So the price one customer really pays the leading rival stands beside it (tops out at 4, like the buyer count).
+    paid = num((pr_.get("people") or {}).get("price_usd"))
+    paid_s = min(band(paid, (150, 150, 50, 20)), 4) if paid else 0
+    if paid_s > value:
+        value, value_note = paid_s, f"one customer pays the leading rival about ${paid:,.0f}; scored on that because the ad click price (${w_cpc:.2f}) only shows what advertisers bid, and rivals here hardly advertise on search"
     adv_reason = (c.v["data"].get("advantage_reason") or "").strip()
     weak_s = min(band(weak, (0.5, 0.3, 0.2, 0.1)), 4 if small else 5)
     d_search = band(buy_vol, (5000, 2000, 1000, 300))
