@@ -192,6 +192,11 @@ def knockouts(c):
         return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but a real business in this niche "
                                                f"made ${best:,.0f} in the last 30 days (payment-verified). The niche pays; search alone does not carry it. "
                                                "Test the channel that business uses (see the revenue proof) before building.")
+    ppl = c.v["data"].get("people_newcomer_month") or None
+    if month < floor and ppl and ppl[1] >= floor:
+        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but counting the buyers gives "
+                                               f"about ${ppl[1]:,.0f} a month for a newcomer (${ppl[0]:,.0f} to ${ppl[2]:,.0f}). The search tools undercount small niches, "
+                                               "so this is tested, not killed.")
     if month < floor:
         return "KILL", (f"Knock-out: only about ${month:,.0f} a month (${market:,.0f} a year) is reachable through Google search, even if you took all of it. "
                         f"Under ${floor:,.0f} a month is too small to build for. As a search business this is a KILL. "

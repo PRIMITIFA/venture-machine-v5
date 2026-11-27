@@ -676,6 +676,21 @@ def build_html(slug):
             H.append("<h3>Do rivals buy ads?</h3><p class=small>From the two public ad libraries. A rival that keeps paying for ads is earning from them, and its buyers do not come from free search alone.</p>" +
                      table([{"n": a_["name"], "m": show(a_.get("meta_ads")), "g": show(a_.get("google_ads"))} for a_ in ads_], ["n", "m", "g"],
                            ["Rival", "Facebook / Instagram ads running", "Google ads"], right=("m", "g")))
+        ppl_, bc_ = pr.get("people"), pr.get("buyer_count") or {}
+        if ppl_:
+            H.append("<h3>Counting the buyers</h3><p><b>%s people a year</b> (%s%s; source: %s%s). At %s a customer, a newcomer taking %d%% to %d%% of them earns <b>%s to %s a month</b>, "
+                     "and the leader of the niche, taking %d%% to %d%%, earns %s to %s a month.</p><p class=small>This is the estimate to trust most: in back-testing it was the only method that matched a real "
+                     "business (an exam course that takes about 22%% to 39%% of a year's applicants), while search-based estimates were 12 to 48 times too low. The shares are still assumptions: "
+                     "the leader's comes from that one case, the newcomer's is not measured.%s</p>"
+                     % ("{:,}".format(ppl_["buyers_per_year"]), e(bc_.get("counts_what") or "yearly figure"), (", " + e(bc_["year"])) if bc_.get("year") else "",
+                        link(bc_["source_url"], bc_.get("source_name") or "source") if bc_.get("source_url") else e(bc_.get("source_name") or "not named"),
+                        "" if bc_.get("official") else ", not an official source", money(ppl_["price_usd"]),
+                        round(ppl_["newcomer"]["share"][0] * 100), round(ppl_["newcomer"]["share"][2] * 100), money(ppl_["newcomer"]["month_usd"][0]), money(ppl_["newcomer"]["month_usd"][2]),
+                        round(ppl_["leader"]["share"][0] * 100), round(ppl_["leader"]["share"][2] * 100), money(ppl_["leader"]["month_usd"][0]), money(ppl_["leader"]["month_usd"][2]),
+                        (" " + e(bc_["notes"])) if bc_.get("notes") else ""))
+        elif pr.get("buyer_count") is not None:
+            H.append("<h3>Counting the buyers</h3><p class=small><b>Not counted.</b> No reliable yearly figure for the number of buyers was found%s. Without it the money estimates rest on search numbers, which undercount small niches.</p>"
+                     % ((" (total holders: %s)" % "{:,}".format(bc_["total_holders"])) if bc_.get("total_holders") else ""))
         from . import proof as _pf
         bt_ = _pf.BACKTEST
         H.append("<h3>How far to trust the numbers in this report</h3><p class=small>Back-tested on %s businesses with payment-verified revenue (%s). "

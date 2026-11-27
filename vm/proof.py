@@ -115,6 +115,26 @@ BACKTEST = {
 }
 
 
+# share of a year's buyers that one site captures. Leader: Tree Nerd Academy took about 22% of a year's ISA applicants in its
+# first year and runs near 39% (one back-test, 2026-11-27). Newcomer against established rivals: an assumption, not measured.
+SHARES = {"newcomer": (0.02, 0.05, 0.08), "leader": (0.20, 0.30, 0.40)}
+
+
+def people_estimate(buyers_per_year, price_usd):
+    """Size a niche by counting the buyers: people who face the exam (or need the thing) each year x share captured x price.
+    The only estimate that matched a real business in back-testing, and it needs no keyword or ad data. None when a number is missing."""
+    try:
+        n, p = float(buyers_per_year or 0), float(price_usd or 0)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0 or p <= 0:
+        return None
+    out = {"buyers_per_year": int(n), "price_usd": p}
+    for who, (lo, mid, hi) in SHARES.items():
+        out[who] = {"share": (lo, mid, hi), "month_usd": (round(n * lo * p / 12), round(n * mid * p / 12), round(n * hi * p / 12))}
+    return out
+
+
 def honest_range(mid):
     """A revenue figure is never one number: with everything knowable, the typical miss is about 2.3 times either way."""
     f = BACKTEST["typical_miss_factor"]

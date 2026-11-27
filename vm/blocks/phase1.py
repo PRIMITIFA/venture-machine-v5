@@ -97,6 +97,18 @@ class Eeat(BaseModel):
     ymyl_banned_claims: list[str] = []
 
 
+class BuyerCount(BaseModel):
+    figure: Optional[int] = Field(default=None, description="how many people (or businesses) a YEAR face this need: sit the exam, apply for the licence, start in the trade. "
+                                  "Copy it from the source. null if no reliable figure was found: never estimate")
+    counts_what: str = Field(default="", description="exactly what the figure counts, e.g. 'candidates who sat the exam in 2025' or 'applications received for all credentials'")
+    year: str = ""
+    source_name: str = ""
+    source_url: str = ""
+    official: bool = Field(default=False, description="true only if the figure comes from the exam or licensing body itself or a government page")
+    total_holders: Optional[int] = Field(default=None, description="total people who hold the credential or work in the trade, if stated (not per year)")
+    notes: str = Field(default="", description="what the figure leaves out or includes, in one plain sentence")
+
+
 class How(BaseModel):
     competitors: list[Competitor] = Field(description="paying competitors you actually found, best first (aim for 3-8)")
     revenue_models: list[str]
@@ -107,6 +119,9 @@ class How(BaseModel):
     needs_physical_logistics: bool
     breaks_house_rules: list[str] = Field(default=[], description="ONLY the house rules this idea actually breaks, one line each. Empty list if none. Never list rules that are not broken")
     eeat: Eeat
+    buyer_count: BuyerCount = Field(default_factory=BuyerCount)
+    typical_price_usd: Optional[float] = Field(default=None, description="what ONE customer pays the best-earning or leading rival for the comparable product, in US dollars "
+                                               "(one-time price, or a year of a subscription). null if no price was found")
     notes: str = ""
 
 
@@ -141,6 +156,10 @@ def b02_how_eeat(c):
         f"""Block 02. Research HOW this business makes money, using web search. Open competitor sites and pricing pages.
 A) Find paying competitors (links + real prices), the revenue model, where the data comes from (API, public register,
 scraping...) and the one validation question.
+C) Count the buyers. Find how many people a year face this need, from the most official source there is: the exam or licensing
+body's annual report or statistics page, or a government count. For an exam this is candidates or applications per year. Copy the figure,
+say exactly what it counts, give the link. Do not estimate: leave it empty if no reliable figure exists. Also give the price one customer
+pays the leading rival.
 B) Google quality (E-E-A-T) check for OUR future site (judge what the owner can realistically have by launch, not what exists today): 1) real person/company behind it (no AI faces) 2) proof of
 expertise 3) unique data for every page 4) contacts, policies, a real example 5) YMYL risk (money/health/law) and claims
 we must never make.
@@ -153,6 +172,11 @@ Intake:
     priced = [x for x in out.competitors if x.price and x.price.lower() != "unknown"]
     e = out.eeat
     pr = revenue_proof(c, i, out.competitors)
+    bc = out.buyer_count
+    pr["buyer_count"] = bc.model_dump()
+    pr["people"] = proof.people_estimate(bc.figure, out.typical_price_usd)
+    c.write("02_proof.json", pr)
+    store.set_data(c.slug, people_newcomer_month=((pr["people"] or {}).get("newcomer") or {}).get("month_usd"))
     kills = []
     if not priced:
         kills.append("nobody is charging money today (no priced competitor found)")
@@ -171,7 +195,10 @@ Intake:
         return Result("kill", "; ".join(kills))
     weak = [k for k in ("expertise_proof", "contacts_policies_real_example") if not getattr(e, k).ok]
     summary = (f"{len(priced)} paying competitors (e.g. {priced[0].name} {priced[0].price}); data: {', '.join(s.name for s in out.data_sources[:3])}; "
-               f"YMYL {e.ymyl_level}; {proof.summary(pr)}")
+               f"YMYL {e.ymyl_level}; {proof.summary(pr)}"
+               + (f"; buyers counted: {bc.figure:,} a year ({bc.counts_what[:70]}), which at ${out.typical_price_usd:,.0f} is about "
+                  f"${pr['people']['newcomer']['month_usd'][1]:,} a month for a newcomer and ${pr['people']['leader']['month_usd'][1]:,} for the leader" if pr.get("people") else
+                  "; buyers not counted (no reliable yearly figure found)"))
     if len(priced) < 3 or weak:
         return Result("warn", summary + (f"; weak E-E-A-T: {', '.join(weak)}" if weak else "") + ("; fewer than 3 paying competitors" if len(priced) < 3 else ""))
     return Result("pass", summary)
@@ -316,6 +343,9 @@ How to score money and certainty:
   When a close one exists (closeness 2 or 3), base the money score on what IT earns and charges: a real business making $10,000+
   in 30 days is strong proof that the niche pays, and raises both scores.
 - Use the price of the best-earning rival, not the cheapest one.
+- "revenue_proof.people" sizes the niche by counting the buyers (people a year x share captured x price). In back-testing this was the
+  only method that matched a real business, so when it exists it is the main evidence for the money score. A newcomer's share is small
+  (2-8%); the leader's share is what a first good site takes when no strong rival exists (20-40%). Say which case this idea is.
 - Search volume is measured in later steps. A missing search number is NOT a reason for a low score here, and a small search
   number does not mean a small business: many niches are sold through ads or social. Say which channel the proven rivals use.
 - If revenue_proof was not checked, say so and score from the paying competitors alone.{c.note()}""",

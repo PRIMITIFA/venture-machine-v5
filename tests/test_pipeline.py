@@ -103,6 +103,8 @@ def fake_ai(task, cls, web_, model):
         "How": {"competitors": [comp(i) for i in range(1, 4)], "revenue_models": ["one-time"],
                 "data_sources": [{"name": "OEM API", "type": "api"}], "validation_question": "Will buyers pay $15?",
                 "delivered_digitally": True, "legal": True, "needs_physical_logistics": False,
+                "buyer_count": {"figure": 5775, "counts_what": "applications received for all credentials", "year": "2025", "source_name": "Annual report",
+                                "source_url": "https://example.org/report.pdf", "official": True}, "typical_price_usd": 225,
                 "eeat": {"real_person_or_company": ok, "expertise_proof": ok, "unique_data_per_page": ok,
                          "contacts_policies_real_example": ok, "ymyl_level": "low"}},
         "Pulse": {"rising_synonyms": ["monroney label"], "new_competitors_12m": ["https://new.com"], "fresh_discussions_90d": ["https://reddit.com/r/x/1"]},
@@ -639,7 +641,10 @@ class RevenueProof(unittest.TestCase):
         self.assertIn("real businesses with verified revenue (best: Sticker Pro $42,327", store.block(slug, "02")["summary"])
         from vm import pdf
         h = pdf.build_html(slug)
-        for part in ("Do real businesses make money here?", "$42,327", "Starter: $60, Self-Study: $199", "pays for ads", "What real sites earn per visitor", "Proven revenue"):
+        self.assertEqual(pr["people"]["leader"]["month_usd"][1], 32484)
+        self.assertIn("buyers counted: 5,775 a year", store.block(slug, "02")["summary"])
+        for part in ("Do real businesses make money here?", "$42,327", "Starter: $60, Self-Study: $199", "pays for ads", "What real sites earn per visitor", "Proven revenue",
+                     "Counting the buyers", "5,775 people a year", "$21,656 to $43,312 a month"):
             self.assertIn(part, h)
 
     def test_small_search_does_not_kill_a_proven_niche(self):
@@ -691,6 +696,13 @@ class RevenueProof(unittest.TestCase):
         lo, mid, hi = self.proof.honest_range(2300)
         self.assertEqual((lo, mid, hi), (1000, 2300, 5290))
         self.assertGreater(self.proof.BACKTEST["tool_traffic_times_too_low"]["typical"], 5)   # tool traffic is far too low for small sites
+
+    def test_counting_the_buyers_matches_the_known_case(self):
+        p = self.proof.people_estimate(5775, 225)                      # ISA applications a year, price per customer
+        self.assertEqual(p["leader"]["month_usd"], (21656, 32484, 43312))   # the real business: $23,500 average, $42,327 latest month
+        self.assertEqual(p["newcomer"]["month_usd"], (2166, 5414, 8662))
+        self.assertIsNone(self.proof.people_estimate(None, 225))       # no count: no number, never a guess
+        self.assertIsNone(self.proof.people_estimate(5775, 0))
 
     def test_unchecked_is_never_reported_as_nothing_found(self):
         self.assertIn("not checked", self.proof.summary({"checked": False}))
