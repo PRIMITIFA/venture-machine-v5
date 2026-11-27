@@ -14,6 +14,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="vm-test-"))
+import atexit  # noqa: E402
+atexit.register(lambda: shutil.rmtree(TMP, ignore_errors=True))  # every test class shares the folder
 os.environ.update(VM_DATA_DIR=str(TMP / "data"), VM_VENTURES_DIR=str(TMP / "ventures"), VM_AI_PROVIDER="fake",
                   DATAFORSEO_LOGIN="x", DATAFORSEO_PASSWORD="y", VM_MAX_USD_PER_IDEA="5", VM_PHASE1_MAX_USD="0.5")
 
@@ -133,6 +135,7 @@ def fake_ai(task, cls, web_, model):
                  "validation_test": {"test": "pre-sale", "why": "cheapest proof", "sample": "200 visitors from the 3 easiest pages", "warmup_days": 0, "days": 14,
                                      "budget_usd": 100, "pass_threshold": ">= 5 paid pre-orders", "kill_threshold": "0 paid pre-orders", "setup_steps": ["page", "button"]}},
         "OnTopic": {"keep": list(range(60))},
+        "Picks": {"picks": [{"slug": "sticker-pro", "why": "sells window stickers to the same car buyers", "closeness": 3}]},
         "Plan": {"product_line": ["sticker PDF"], "free_hook": "free preview", "upsell": "dealer plan", "why_us_5_seconds": "instant",
                  "forecast_12m_usd": {"low": 5000, "mid": 20000, "high": 60000}, "forecast_assumptions": "x",
                  "pages": [{"cluster_id": i, "url_slug": f"p{i}", "title": f"Page {i} unique angle {i * 7}", "page_type": "data",
@@ -169,9 +172,6 @@ class Pipeline(unittest.TestCase):
         web.screenshots = lambda url, prefix: []
         ai.FAKE = fake_ai
 
-    @classmethod
-    def tearDownClass(cls):
-        shutil.rmtree(TMP, ignore_errors=True)
 
     def test_full_run_with_gates(self):
         slug = pipeline.new("window sticker reports for used car buyers", country="us")
@@ -574,6 +574,92 @@ class BuildEffortNotCounted(unittest.TestCase):
             self.assertEqual(phase1.first_result(sc)[0], "kill")  # old rule: over 30 days
         finally:
             del os.environ["VM_COUNT_BUILD_EFFORT"]
+
+
+class RevenueProof(unittest.TestCase):
+    """A keyword count measures one channel. Real businesses with verified revenue decide what a niche can pay."""
+    ROWS = [{"slug": "sticker-pro", "name": "Sticker Pro", "website": "https://stickerpro.com", "category": "Utilities", "targetAudience": "B2C",
+             "description": "Window sticker PDF by VIN for used car buyers", "foundedDate": "2025-12-04T00:00:00.000Z",
+             "revenue": {"last30Days": 42327.15, "mrr": 0, "total": 282010.2}, "visitorsLast30Days": 11093, "revenuePerVisitor": 3.91, "growth30d": 28.5},
+            {"slug": "cat-facts", "name": "Cat Facts", "website": "https://catfacts.com", "category": "Entertainment", "description": "Daily cat facts by email",
+             "revenue": {"last30Days": 900, "mrr": 900, "total": 5000}, "visitorsLast30Days": 400000, "revenuePerVisitor": 0.002}]
+
+    @classmethod
+    def setUpClass(cls):
+        from vm import proof
+        cls.proof = proof
+        seo.post = fake_post
+        web.fetch = fake_fetch
+        web.sitemap = lambda d, max_children=5: {"found": True, "urls": 120, "oldest": "2019-01-01", "newest": "2026-01-01", "source": "", "note": ""}
+        web.screenshots = lambda url, prefix: []
+        ai.FAKE = fake_ai
+        many = list(cls.ROWS)
+        for i in range(12):  # enough rows per traffic band for a calibration
+            many.append({"slug": f"small{i}", "name": f"Small {i}", "website": f"https://small{i}.com", "revenue": {"last30Days": 12000 + i, "mrr": 0, "total": 1},
+                         "visitorsLast30Days": 500 + i, "revenuePerVisitor": 20 + i, "description": "niche b2b tool"})
+            many.append({"slug": f"mid{i}", "name": f"Mid {i}", "website": f"https://mid{i}.com", "revenue": {"last30Days": 15000 + i, "mrr": 0, "total": 1},
+                         "visitorsLast30Days": 9000 + i, "revenuePerVisitor": 1 + i / 10, "description": "consumer tool"})
+        (proof.folder() / "band-test.json").write_text(__import__("json").dumps(many))
+        cls._detail, cls._ads = proof.detail, proof.ads
+        proof.detail = lambda slug: {"domainRating": 6, "startupInsights": {"pricingModel": "Starter: $60, Self-Study: $199", "targetPersona": "car buyers", "estimatedUserCount": 753},
+                                     "marketingChannels": [{"slug": "meta-ads", "category": "paid"}, {"slug": "seo", "category": "organic"}]}
+        proof.ads = lambda name, domain: {"name": name, "domain": domain, "meta_ads": 41 if "sticker" in name.lower() else None, "google_ads": 2 if "sticker" in name.lower() else None}
+        os.environ["TRUSTMRR_API_KEY"] = "test"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proof.detail, cls.proof.ads = cls._detail, cls._ads
+        os.environ.pop("TRUSTMRR_API_KEY", None)
+        for f in cls.proof.folder().glob("band*.json"):
+            f.unlink()
+
+    def test_per_visitor_bands_and_prediction(self):
+        cal = self.proof.calibration()
+        small, mid = [b for b in cal if b["visitors_month"] == "under 2,000"][0], [b for b in cal if b["visitors_month"] == "2,000 to 35,000"][0]
+        self.assertGreater(small["median"], 10 * mid["median"])        # few visitors at a real price earn far more per visitor
+        p = self.proof.predict(11000, cal)
+        self.assertEqual(p["mid"], round(11000 * mid["median"]))
+        self.assertIsNone(self.proof.predict(10 ** 7, cal))            # no data for that size: no made-up number
+
+    def test_shortlist_matches_on_meaning_words(self):
+        got = [x["slug"] for x in self.proof.shortlist("window sticker lookup for people who buy a used car")]
+        self.assertEqual(got[0], "sticker-pro")
+        self.assertNotIn("cat-facts", got)
+
+    def test_proof_reaches_the_report_and_the_score_inputs(self):
+        slug = pipeline.new("Paid window sticker report by VIN for buyers of used cars in the United States", country="us")
+        pipeline.run(slug, say=lambda m: None)
+        pr = pipeline.Ctx(slug).read("02_proof.json")
+        self.assertTrue(pr["checked"])
+        self.assertEqual(pr["comparables"][0]["revenue_30d_usd"], 42327)
+        self.assertEqual(pr["comparables"][0]["paid_channels"], ["meta-ads"])
+        self.assertEqual(store.venture(slug)["data"]["proof_best_30d"], 42327)
+        self.assertIn("real businesses with verified revenue (best: Sticker Pro $42,327", store.block(slug, "02")["summary"])
+        from vm import pdf
+        h = pdf.build_html(slug)
+        for part in ("Do real businesses make money here?", "$42,327", "Starter: $60, Self-Study: $199", "pays for ads", "What real sites earn per visitor", "Proven revenue"):
+            self.assertIn(part, h)
+
+    def test_small_search_does_not_kill_a_proven_niche(self):
+        from vm.blocks import gates
+
+        class C:  # the knock-out only needs the market size and the stored proof
+            v = {"data": {"proof_best_30d": 42327}}
+            read = staticmethod(lambda name, default=None: {})
+        old = gates.market_at_chosen_price
+        gates.market_at_chosen_price = lambda c, mk: 14 * 12          # $14 a month through search: far under the floor
+        try:
+            rec, note = gates.knockouts(C)
+            self.assertTrue(rec.startswith("QUICK TEST"))
+            self.assertIn("made $42,327 in the last 30 days", note)
+            C.v = {"data": {"proof_best_30d": 0}}
+            self.assertEqual(gates.knockouts(C)[0], "KILL")            # no proof: the old rule stands
+        finally:
+            gates.market_at_chosen_price = old
+
+    def test_unchecked_is_never_reported_as_nothing_found(self):
+        self.assertIn("not checked", self.proof.summary({"checked": False}))
+        self.assertIn("no real business", self.proof.summary({"checked": True, "comparables": []}))
 
 
 if __name__ == "__main__":

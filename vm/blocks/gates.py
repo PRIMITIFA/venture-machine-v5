@@ -163,6 +163,11 @@ def knockouts(c):
     mk = c.read("14_market_analysis.json")
     market = market_at_chosen_price(c, mk)
     month, floor, target = market / 12, S.min_market_month, S.target_market_month
+    best = c.v["data"].get("proof_best_30d") or 0
+    if month < target and best >= S.proof_min_usd:
+        return "QUICK TEST (7 days, capped)", (f"Capped at TEST: only about ${month:,.0f} a month is reachable through Google search, but a real business in this niche "
+                                               f"made ${best:,.0f} in the last 30 days (payment-verified). The niche pays; search alone does not carry it. "
+                                               "Test the channel that business uses (see the revenue proof) before building.")
     if month < floor:
         return "KILL", (f"Knock-out: only about ${month:,.0f} a month (${market:,.0f} a year) is reachable through Google search, even if you took all of it. "
                         f"Under ${floor:,.0f} a month is too small to build for. As a search business this is a KILL. "

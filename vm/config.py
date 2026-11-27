@@ -106,6 +106,21 @@ class Settings:
         return _f("VM_GOOD_CASE_SHARE", 0.35)
 
     @property
+    def trustmrr_key(self):
+        """Key for the verified-revenue database (revenue proof). Without it the proof step is skipped and says so."""
+        return os.environ.get("TRUSTMRR_API_KEY", "").strip()
+
+    @property
+    def browser_cmd(self):
+        """Optional command that reads a page in a real browser and prints JSON {status, text} (used for the public ad libraries)."""
+        return os.environ.get("VM_BROWSER_CMD", "").strip()
+
+    @property
+    def proof_min_usd(self):
+        """A real business in the niche earning at least this much in 30 days proves the niche can pay, even when search is small."""
+        return _f("VM_PROOF_MIN_USD", 5000)
+
+    @property
     def count_build_effort(self):
         """False (default): how long or hard an idea is to BUILD never counts against it; the first-look score is money + certainty only."""
         return os.environ.get("VM_COUNT_BUILD_EFFORT", "0").strip().lower() in ("1", "true", "yes")

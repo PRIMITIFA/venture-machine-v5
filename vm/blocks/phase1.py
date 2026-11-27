@@ -6,7 +6,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .. import ai, seo, store, web
+from .. import ai, proof, seo, store, web
 from ..config import S
 from ..pipeline import Result
 from ..util import pct_change
@@ -110,6 +110,31 @@ class How(BaseModel):
     notes: str = ""
 
 
+def revenue_proof(c, intake, competitors):
+    """Real businesses with verified revenue in this niche, what real sites earn per visitor, and whether rivals buy ads.
+    Never stops an idea on its own; a failure here is reported as 'not checked', never as 'nothing found'."""
+    pr = {"checked": False, "comparables": [], "ads": [], "calibration": [], "note": ""}
+    try:
+        if proof.available() and proof.rows():
+            pr["checked"] = True
+            pr["calibration"] = proof.calibration()
+            pr["comparables"] = proof.comparables(intake, c.v["data"].get("key_terms") or [])
+        else:
+            pr["note"] = "no TRUSTMRR_API_KEY, or no data pulled yet (run: vm proof sync)"
+        from ..util import domain_of
+        seen = set()
+        targets = [(x["name"], domain_of(x["website"] or "")) for x in pr["comparables"][:3]] + [(x.name, domain_of(x.url)) for x in competitors[:4]]
+        for name, dom in targets:
+            if dom and dom not in seen and len(seen) < 4:
+                seen.add(dom)
+                pr["ads"].append(proof.ads(name, dom))
+    except Exception as ex:  # proof is extra evidence: it must never break the run
+        pr["note"] = f"proof step failed: {type(ex).__name__}: {str(ex)[:160]}"
+    c.write("02_proof.json", pr)
+    store.set_data(c.slug, proof_best_30d=proof.best_revenue(pr), proof_checked=pr["checked"])
+    return pr
+
+
 def b02_how_eeat(c):
     i = c.read("01_intake.md")
     out = ai.ask_json(
@@ -127,6 +152,7 @@ Intake:
     c.write("03_eeat_quality.json", d["eeat"])
     priced = [x for x in out.competitors if x.price and x.price.lower() != "unknown"]
     e = out.eeat
+    pr = revenue_proof(c, i, out.competitors)
     kills = []
     if not priced:
         kills.append("nobody is charging money today (no priced competitor found)")
@@ -144,7 +170,8 @@ Intake:
     if kills:
         return Result("kill", "; ".join(kills))
     weak = [k for k in ("expertise_proof", "contacts_policies_real_example") if not getattr(e, k).ok]
-    summary = f"{len(priced)} paying competitors (e.g. {priced[0].name} {priced[0].price}); data: {', '.join(s.name for s in out.data_sources[:3])}; YMYL {e.ymyl_level}"
+    summary = (f"{len(priced)} paying competitors (e.g. {priced[0].name} {priced[0].price}); data: {', '.join(s.name for s in out.data_sources[:3])}; "
+               f"YMYL {e.ymyl_level}; {proof.summary(pr)}")
     if len(priced) < 3 or weak:
         return Result("warn", summary + (f"; weak E-E-A-T: {', '.join(weak)}" if weak else "") + ("; fewer than 3 paying competitors" if len(priced) < 3 else ""))
     return Result("pass", summary)
@@ -275,14 +302,23 @@ class Scorecard(BaseModel):
 
 def b04_ice(c):
     ctx = {"intake": c.read("01_intake.md"), "how": c.read("02_how_analysis.json"),
-           "eeat": c.read("03_eeat_quality.json"), "niche": c.read("04_niche_pulse.json")}
+           "eeat": c.read("03_eeat_quality.json"), "niche": c.read("04_niche_pulse.json"),
+           "revenue_proof": c.read("02_proof.json", default={"checked": False})}
     out = ai.ask_json(
         f"""Block 04. Score this idea. Give exactly 5 arguments FOR and 5 AGAINST, the single biggest unknown, the effort
 (days to a working MVP built with an AI coding agent, monthly running cost, API dependencies, owner hours/week),
 ICE 1-10 (Impact, Confidence, Ease) with one short plain reason each, synergy with the owner's existing assets, hard blockers,
 and a 3-line summary. Also name the ONE other angle that could work better (a different customer, B2B, a narrower group or another
 way to charge), written as a full new idea sentence, so it can be tested on its own if this idea scores under 6.
-In the summary and reasons use plain words; never write "ICE" or score shorthand like "3/2/4".{c.note()}""",
+In the summary and reasons use plain words; never write "ICE" or score shorthand like "3/2/4".
+How to score money and certainty:
+- "revenue_proof" lists real businesses in this niche with payment-verified revenue, their prices and what real sites earn per visitor.
+  When a close one exists (closeness 2 or 3), base the money score on what IT earns and charges: a real business making $10,000+
+  in 30 days is strong proof that the niche pays, and raises both scores.
+- Use the price of the best-earning rival, not the cheapest one.
+- Search volume is measured in later steps. A missing search number is NOT a reason for a low score here, and a small search
+  number does not mean a small business: many niches are sold through ads or social. Say which channel the proven rivals use.
+- If revenue_proof was not checked, say so and score from the paying competitors alone.{c.note()}""",
         Scorecard, smart=True, context=ctx)
     d = out.model_dump()
     avg = first_avg(d["ice"])

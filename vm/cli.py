@@ -71,6 +71,23 @@ def cmd_pdf(a):
     print(f if f else msg)
 
 
+def cmd_proof(a):
+    from . import proof
+    if a.action == "sync":
+        if not proof.available():
+            raise SystemExit("set TRUSTMRR_API_KEY first (trustmrr.com, developer dashboard)")
+        proof.sync(a.min, a.max)
+        return
+    rs = proof.rows()
+    if a.action == "bands":
+        print(f"{len(rs)} businesses pulled")
+        for b in proof.calibration(rs):
+            print(f"  {b['visitors_month']:>18} visitors a month: " + (f"${b['low']:.2f} / ${b['median']:.2f} / ${b['high']:.2f} a visitor (lower quarter / typical / upper quarter, {b['n']} businesses)" if "median" in b else f"too few ({b['n']})"))
+        return
+    for x in proof.discover(a.min, a.max, a.since, a.all)[:a.top]:
+        print(f"${x['revenue_30d_usd']:>8,}  {x['founded'] or '   ?   '}  {x['name'][:30]:<30}  {x['website']}")
+
+
 def cmd_doctor(a):
     print(f"data folder : {S.data_dir}")
     print(f"AI provider : {ai.provider()}  (smart={S.model_smart}, fast={S.model_fast})")
@@ -89,6 +106,9 @@ def cmd_doctor(a):
     except ImportError:
         print("screenshots : off (optional: pip install playwright && playwright install chromium)")
     print(f"PDF         : {'playwright' if 'playwright' in sys.modules else (pdf.find_browser() or 'no browser found: open findings.html and print to PDF')}")
+    from . import proof
+    print("revenue proof: " + (f"TrustMRR key set, {len(proof.rows())} businesses pulled" if proof.available() else "off (set TRUSTMRR_API_KEY, then: vm proof sync)")
+          + ("; ad libraries on" if S.browser_cmd else "; ad libraries off (set VM_BROWSER_CMD)"))
     print(f"house rules : {'house_rules.md' if (ROOT / 'house_rules.md').exists() else 'house_rules.example.md (copy it to house_rules.md and edit)'}")
 
 
@@ -139,6 +159,14 @@ def main(argv=None):
     s.add_argument("slug")
     s.set_defaults(f=cmd_pdf)
     sub.add_parser("doctor", help="check keys, balance and setup").set_defaults(f=cmd_doctor)
+    s = sub.add_parser("proof", help="verified revenue of real businesses: sync (pull), bands (what sites earn per visitor), discover (young businesses that already earn)")
+    s.add_argument("action", choices=["sync", "bands", "discover"])
+    s.add_argument("--min", type=float, default=5000, help="lowest revenue in the last 30 days, in dollars (sync: use 500 to pull widely)")
+    s.add_argument("--max", type=float, default=150000)
+    s.add_argument("--since", default="2024-01", help="discover: founded in this month or later (YYYY-MM)")
+    s.add_argument("--all", action="store_true", help="discover: also show the crowded categories (AI, marketing, developer tools)")
+    s.add_argument("--top", type=int, default=60)
+    s.set_defaults(f=cmd_proof)
     s = sub.add_parser("ui", help="local web app on http://127.0.0.1:8765")
     s.add_argument("--port", type=int, default=8765)
     s.set_defaults(f=cmd_ui)

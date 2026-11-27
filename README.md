@@ -10,6 +10,7 @@ PHASE 4  PLAN + GUARDRAILS    15 tools, costs, GUARDRAILS.md  16 unit economics 
 ```
 
 **Rules the tool enforces:**
+- **Real revenue first.** Before an idea is scored, the machine looks for real businesses in the niche with payment-verified revenue, what they charge, what they earn per visitor and whether they buy ads. Search volume is one channel, not the market.
 - **No invented numbers.** Every volume, CPC, keyword difficulty (KD), domain rating (DR), traffic figure and price comes from an API or from a web page, with its source.
 - **The AI only sorts, labels and writes.** It does not supply the numbers.
 - **Hard money caps.** The default is **$5 per idea** for all paid API calls in phases 1-4, and $0.50 for phase 1. If the next call could go over the cap, the tool refuses to make it.

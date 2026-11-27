@@ -473,6 +473,12 @@ def build_html(slug):
         from .util import weighted_cpc
         wc_ = weighted_cpc(kws or [])
         glance.append(("Buyer value", "advertisers pay about %s per click on average across the buying searches (highest single one %s)" % (money(wc_), money(top_cpc)), *verdict(wc_ >= 2, wc_ >= 1)))
+    pr_ = jf("02_proof.json")
+    if pr_ and pr_.get("checked"):
+        from . import proof as _proof
+        best30 = _proof.best_revenue(pr_)
+        glance.append(("Proven revenue", ("a real business in this niche made %s in the last 30 days (payment-verified)" % money(best30)) if best30
+                       else "no business with verified revenue found in this niche", *verdict(best30 >= S.proof_min_usd, best30 >= 1000)))
     if how and not biz:
         priced = [x_ for x_ in how.get("competitors", []) if x_.get("price") and "unknown" not in x_["price"].lower()]
         free_ = sum(1 for x_ in priced if "free" in x_["price"].lower())
@@ -637,6 +643,45 @@ def build_html(slug):
     H.append("<div class=worry>%s</div>" % bullets(worries) if worries else "<p>Nothing serious was flagged.</p>")
     H.append("<h3>All next steps</h3><ol class=steps>" + "".join("<li>%s</li>" % e(x) for x in nxt) + "</ol>")
     if section_open:
+        end()
+
+    # ================= REVENUE PROOF: DO REAL BUSINESSES MAKE MONEY HERE? =================
+    pr = jf("02_proof.json")
+    if pr:
+        section("Do real businesses make money here?", "Businesses in this niche whose revenue is read from their payment provider, what they charge, and how they find buyers.")
+        comps_ = pr.get("comparables") or []
+        if not pr.get("checked"):
+            H.append("<p><b>Not checked.</b> %s. Until it is checked, the money estimates in this report rest on search numbers alone, which measure one channel only.</p>"
+                     % e(pr.get("note") or "No revenue data was available"))
+        elif not comps_:
+            H.append("<p><b>No real business with verified revenue was found in this niche.</b> That is not proof nobody earns here: the database only holds founders who chose to list. "
+                     "It does mean there is no revenue proof yet.</p>")
+        else:
+            best_ = max(comps_, key=lambda x_: x_["revenue_30d_usd"])
+            H.append("<p><b>%d real businesses compare to this idea.</b> The best earner, %s, made <b>%s in the last 30 days</b>%s. Revenue is read from the payment provider, not claimed.</p>"
+                     % (len(comps_), e(best_["name"]), money(best_["revenue_30d_usd"]), (" selling at " + e(first_sentence(best_["price"], 90))) if best_.get("price") else ""))
+            rw = [{"n": link(x_["page"], x_["name"]), "w": {3: "same niche", 2: "same kind of product", 1: "loosely alike"}.get(x_.get("closeness"), ""),
+                   "r": money(x_["revenue_30d_usd"]), "t": money(x_["revenue_total_usd"]), "f": x_.get("founded") or "?", "p": first_sentence(x_.get("price") or "not listed", 70),
+                   "v": ("{:,}".format(x_["visitors_30d"]) if x_.get("visitors_30d") else "not shared"),
+                   "pv": (money(x_["revenue_per_visitor"]) if x_.get("revenue_per_visitor") else "-"), "d": x_.get("domain_rating") if x_.get("domain_rating") is not None else "?"} for x_ in comps_]
+            H.append(table(rw, ["n", "w", "r", "t", "f", "p", "v", "pv", "d"],
+                           ["Business", "How close", "Last 30 days", "All time", "Founded", "Price", "Visitors a month", "Earned per visitor", "Site strength (0-100)"], raw=("n",), right=("r", "t", "v", "pv", "d")))
+            said = [x_ for x_ in comps_ if x_.get("channels")]
+            if said:
+                H.append("<p><b>Where they say buyers come from:</b> " + "; ".join("%s: %s%s" % (e(x_["name"]), e(", ".join(x_["channels"][:6]).replace("-", " ")),
+                         " (<b>pays for ads</b>)" if x_.get("paid_channels") else "") for x_ in said) + ".</p>")
+        ads_ = [a_ for a_ in pr.get("ads") or [] if a_.get("meta_ads") is not None or a_.get("google_ads") is not None]
+        if ads_:
+            show = lambda v_: "not checked" if v_ is None else "none found" if v_ == 0 else "{:,}".format(v_)  # noqa: E731
+            H.append("<h3>Do rivals buy ads?</h3><p class=small>From the two public ad libraries. A rival that keeps paying for ads is earning from them, and its buyers do not come from free search alone.</p>" +
+                     table([{"n": a_["name"], "m": show(a_.get("meta_ads")), "g": show(a_.get("google_ads"))} for a_ in ads_], ["n", "m", "g"],
+                           ["Rival", "Facebook / Instagram ads running", "Google ads"], right=("m", "g")))
+        cal_ = [b_ for b_ in pr.get("calibration") or [] if "median" in b_]
+        if cal_:
+            H.append("<h3>What real sites earn per visitor</h3><p class=small>From %d businesses with verified revenue and visitor counts. Small sites with a narrow buyer and a real price earn dollars per visitor; "
+                     "big free tools earn cents. These are businesses that already earn, so read them as what a working site gets, not an average.</p>" % sum(b_["n"] for b_ in cal_) +
+                     table([{"v": b_["visitors_month"], "n": b_["n"], "l": money(b_["low"]), "m": money(b_["median"]), "h": money(b_["high"])} for b_ in cal_], ["v", "n", "l", "m", "h"],
+                           ["Visitors a month", "Businesses", "Lower quarter", "Typical", "Upper quarter"], right=("n", "l", "m", "h")))
         end()
 
     # ================= PART 2: DEMAND =================
