@@ -174,7 +174,14 @@ def timeline(offer, forecast_mid, market_year_usd, today=None):
         if test.get("warmup_days"):
             start = t + dt.timedelta(days=int(test["warmup_days"]))
             steps.append(("warm-up done, validation test starts", start.isoformat()))
-        start = start + dt.timedelta(days=int(test["days"]))
+        begin = start
+        end = begin + dt.timedelta(days=int(test["days"]))
+        hol_a, hol_b = dt.date(begin.year, 12, 18), dt.date(begin.year + 1, 1, 4)
+        if begin <= hol_b and end >= hol_a:   # nobody answers a test sent over Christmas and New Year: start after it
+            begin = hol_b + dt.timedelta(days=(7 - hol_b.weekday()) % 7 or 0)
+            steps.append(("validation test starts (moved past the year-end holidays, when buyers do not answer)", begin.isoformat()))
+            end = begin + dt.timedelta(days=int(test["days"]))
+        start = end
         steps.append(("validation test ends: decide (first paid pre-orders, or stop)", start.isoformat()))
     live = start + dt.timedelta(days=int(offer.get("build_days") or 14))
     steps += [("first version live", live.isoformat()), ("pages indexed by Google", (live + dt.timedelta(days=14)).isoformat())]

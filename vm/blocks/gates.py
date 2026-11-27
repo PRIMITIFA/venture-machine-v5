@@ -99,7 +99,7 @@ def gate3_scores(c):
     month, target = bottom_up / 12, S.target_market_month
     # a rival's own name is not an easy search for us (that rival holds the top spot), so it is left out of the ranking score
     short = [r for r in read_csv(c.path("11_shortlist.csv")) if r.get("intent") != "brand"]
-    easy = sum(1 for r in short if r["kd"] != "" and num(r["kd"]) <= 20) / max(len(short), 1)
+    easy = sum(1 for r in short if r["kd"] != "" and 0 < num(r["kd"]) <= 20) / max(len(short), 1)   # 0 = not measured, never "easy"
     seo_ = c.read("15_competitor_seo.json")
     direct = [s for s in seo_["competitors"] if s.get("kind", "direct") == "direct" and s.get("dr") is not None]
     min_dr = min([num(s["dr"], 100) for s in direct] or [100])
@@ -340,7 +340,7 @@ def light_scores(c):
     else:
         alive = 5 if st_ == "alive" else 2 if st_ == "unknown" else 3
     clusters = c.read("10_clusters_serp.json", default=[]) or []
-    easy = sum(1 for cl in clusters[:15] if cl.get("kd") not in ("", None) and num(cl["kd"]) <= 30) / max(min(len(clusters), 15), 1)
+    easy = sum(1 for cl in clusters[:15] if cl.get("kd") not in ("", None) and 0 < num(cl["kd"]) <= 30) / max(min(len(clusters), 15), 1)
     sc = c.read("05_scorecard.json", default={}) or {}
     ice = num(sc.get("ice_avg"), 5)
     s = {

@@ -392,7 +392,7 @@ They rank on Google for our searches. Classify each one; judge by what the site 
         c.write("04_niche_pulse.json", pulse)
     top20 = clusters[:20]
     buy_clusters = sum(1 for cl in top20 if cl["intent"] in BUY_INTENTS)
-    buy_easy = sum(1 for r in unique_searches(rows) if is_buy(r) and r["kd"] != "" and num(r["kd"]) <= 20)  # close wordings count once
+    buy_easy = sum(1 for r in unique_searches(rows) if is_buy(r) and r["kd"] != "" and 0 < num(r["kd"]) <= 20)  # close wordings count once; 0 = not measured
     hard_all = all(num(r["kd"]) >= 50 for r in rows if r["kd"] != "")
     summary = (f"{buy_clusters} buying clusters in top 20; {buy_easy} buying keywords KD<=20; "
                f"top competitors: {', '.join(x['domain'] for x in comps)}"

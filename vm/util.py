@@ -93,8 +93,19 @@ BUY_INTENTS = ("buy", "competitor", "brand-model")
 INTENT_VOLUME_W = {"buy": 1.0, "competitor": 1.0, "brand-model": 1.0, "brand": 0.1, "info": 0.0}
 
 
+FREE_WORDS = re.compile(r"\b(free|gratis|gratuit|kostenlos|nemokam\w*)\b", re.I)
+
+
+def intent_of(k):
+    """The intent used for counting. Someone searching for a FREE version is not ready to pay, whatever label the search got."""
+    i = k.get("intent")
+    if i in BUY_INTENTS and FREE_WORDS.search(str(k.get("keyword", ""))):
+        return "info"
+    return i
+
+
 def is_buy(k):
-    return k.get("intent") in BUY_INTENTS
+    return intent_of(k) in BUY_INTENTS
 
 
 def unique_searches(kws):
@@ -106,7 +117,7 @@ def unique_searches(kws):
     for k in kws:
         vol, cpc = num(k.get("volume")), num(k.get("cpc"))
         words = tuple(sorted(set(str(k.get("keyword", "")).lower().split())))
-        key = (vol, cpc, k.get("intent")) if cpc > 0 else (vol, 0.0, k.get("intent"), words)
+        key = (vol, cpc, intent_of(k)) if cpc > 0 else (vol, 0.0, intent_of(k), words)
         groups.setdefault(key, []).append(k)
     out = []
     for g in groups.values():
@@ -122,13 +133,13 @@ def unique_searches(kws):
 def buy_volume(kws):
     """Searches a month that count as buying demand: commercial searches in full, a rival's bare brand name at 10%.
     Close wordings of one search are counted once (see unique_searches)."""
-    return sum(num(k.get("volume")) * INTENT_VOLUME_W.get(k.get("intent"), 0.0) for k in unique_searches(kws))
+    return sum(num(k.get("volume")) * INTENT_VOLUME_W.get(intent_of(k), 0.0) for k in unique_searches(kws))
 
 
 def volume_split(kws):
     out = {"commercial": 0, "brand": 0, "info": 0}
     for k in unique_searches(kws):
-        out["commercial" if is_buy(k) else "brand" if k.get("intent") == "brand" else "info"] += num(k.get("volume"))
+        out["commercial" if is_buy(k) else "brand" if intent_of(k) == "brand" else "info"] += num(k.get("volume"))
     return {k: int(v) for k, v in out.items()}
 
 

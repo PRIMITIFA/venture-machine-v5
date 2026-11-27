@@ -12,6 +12,10 @@ from ..util import buy_volume, is_buy, md_table, median, num, read_csv, volume_s
 
 
 # ---------------- 10 Top-5 UX audit ----------------
+# words that describe OUR failure to load a page, not something wrong with the rival
+FETCH_FAIL = re.compile(r"\b(404|403|5\d\d|not found|no page content|returns? (a |an )?(error|404)|redirect stub|could not be (opened|loaded|fetched)|failed to load|timed? ?out|blocked|captcha|no title and no text|page (is )?(empty|blank))\b", re.I)
+
+
 class UxOne(BaseModel):
     domain: str
     steps_to_checkout_estimate: Optional[int] = Field(default=None, description="estimate from the pages seen; null if unknown")
@@ -60,9 +64,17 @@ Use only what the data and screenshots show.{c.note()}""",
     rows = [dict(f, **{k: v for k, v in by.get(f["domain"], {}).items() if k != "domain"}) for f in facts]
     for r in rows:
         r.pop("text", None)
+        # a page we could not open says nothing about the rival: it is "not checked", never a weakness and never proof the rival is gone
+        failed = num(r.get("status")) >= 400 or r.get("blocked_or_captcha")
+        kept = [w for w in (r.get("weaknesses") or []) if not FETCH_FAIL.search(w)]
+        if failed or len(kept) < len(r.get("weaknesses") or []):
+            r["could_not_open"] = bool(failed)
+            r["weaknesses"] = [] if failed else kept
+            if failed and r["domain"] not in manual:
+                manual.append(r["domain"])
     c.write("12_competitor_ux.json", {"competitors": rows, "manual_review_at_gate2": manual})
     n_weak = sum(len(r.get("weaknesses") or []) for r in rows)
-    summary = f"{n_weak} concrete weaknesses across {len(rows)} competitors" + (f"; blocked (check by hand at gate 2): {', '.join(manual)}" if manual else "")
+    summary = f"{n_weak} concrete weaknesses across {len(rows)} competitors" + (f"; could not be opened, so NOT judged (check by hand at gate 2, they may be alive): {', '.join(manual)}" if manual else "")
     if n_weak >= 2:
         return Result("pass", summary)
     return Result("warn", summary + "; they are strong: the edge must come from price, data or B2B (block 11)")
@@ -120,6 +132,10 @@ def b11_business(c):
 B2B/API, checkout provider, trial/refunds, affiliate or ad networks. Use the pricing pages given and web search; cite URLs.
 Then look for ads that have run 30+ days (Meta Ad Library, Google Ads Transparency Center) - only list what you verified.
 Collect real buyer quotes (Reddit, reviews, forums) with URLs and write ONE identified_gap line.
+A rival whose page could not be opened ("could_not_open", or any 404 / blocked page) may be perfectly alive: sites move and block bots.
+Open its main domain and its pricing page yourself before saying anything about it. NEVER base the gap on a rival being offline,
+gone or "returning 404", and never count a failed page load as a weakness. If you cannot confirm, say "not checked".
+Check each rival's guarantee and refund terms on its own site before claiming nobody offers one.
 Our data sources and their cost are in 'how'. Say if competitors sell cheaper than our data cost AND have better data.{c.note()}""",
         Business, web=True, smart=True,
         context={"competitors": comps, "pricing_pages": pages, "how": {"data_sources": how["data_sources"], "competitors_02": how["competitors"]},

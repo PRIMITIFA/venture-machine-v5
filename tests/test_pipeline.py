@@ -267,7 +267,8 @@ class Pipeline(unittest.TestCase):
         brand = [r for r in clean if r["keyword"] == KWS[1]][0]
         self.assertEqual(brand["intent"], "brand")                         # a rival's bare name: counted at 10%
         from vm.util import unique_searches
-        full = sum(float(r["volume"]) for r in unique_searches(clean) if r["intent"] in ("buy", "competitor", "brand-model"))
+        from vm.util import is_buy
+        full = sum(float(r["volume"]) for r in unique_searches(clean) if is_buy(r))   # "free ..." searches are not buying searches
         self.assertAlmostEqual(buy_volume(clean), full + 0.1 * float(brand["volume"]), places=3)
         import json
         comps = json.loads((d / "11_top_competitors.json").read_text())
@@ -464,18 +465,18 @@ class Pure(unittest.TestCase):
 
     def test_dates_come_from_test_and_forecast(self):
         import datetime as dt
-        day = dt.date(2026, 11, 26)
+        day = dt.date(2026, 9, 1)                                             # away from the year-end holidays
         offer = {"build_days": 10, "test": {"days": 14, "warmup_days": 14}}
         tl = phase4.timeline(offer, forecast_mid=565, market_year_usd=1695, today=day)
         by = {s["goal"]: s["by"] for s in tl["steps"]}
         self.assertTrue(tl["test_first"])
-        self.assertEqual(tl["build_from"], "2026-12-24")                     # 14 days warm-up + 14 days test: nothing is built before
-        self.assertEqual(by["first version live"], "2027-01-03")
+        self.assertEqual(tl["build_from"], "2026-09-29")                     # 14 days warm-up + 14 days test: nothing is built before
+        self.assertEqual(by["first version live"], "2026-10-09")
         self.assertIn("not reached", by["$1,000 a month"])                   # $565 a year never gets to $1,000 a month
         self.assertIn("not reached", by["$100 a month"])
         big = phase4.timeline(offer, forecast_mid=60000, market_year_usd=400000, today=day)
         self.assertFalse(big["test_first"])                                  # a market of the size we want: build right away
-        self.assertRegex({s["goal"]: s["by"] for s in big["steps"]}["$1,000 a month"], r"^2027-")
+        self.assertRegex({s["goal"]: s["by"] for s in big["steps"]}["$1,000 a month"], r"^202[67]-")
 
     def test_rival_name_is_never_easy(self):
         from vm import pdf
@@ -688,6 +689,36 @@ class RevenueProof(unittest.TestCase):
     def test_unchecked_is_never_reported_as_nothing_found(self):
         self.assertIn("not checked", self.proof.summary({"checked": False}))
         self.assertIn("no real business", self.proof.summary({"checked": True, "comparables": []}))
+
+
+class FourthAudit(unittest.TestCase):
+    """Faults a reviewer found in the welding-inspector report (2026-11-27)."""
+
+    def test_free_searches_are_not_buying_searches(self):
+        from vm.util import buy_volume, is_buy, volume_split
+        kws = [{"keyword": "free cwi practice test", "volume": 480, "cpc": 2.1, "intent": "buy", "kd": 5},
+               {"keyword": "cwi practice test", "volume": 320, "cpc": 2.6, "intent": "buy", "kd": 7}]
+        self.assertFalse(is_buy(kws[0]))
+        self.assertEqual(buy_volume(kws), 320)
+        self.assertEqual(volume_split(kws), {"commercial": 320, "brand": 0, "info": 480})
+
+    def test_a_failed_page_load_is_not_a_rival_weakness(self):
+        from vm.blocks.phase3 import FETCH_FAIL
+        for w in ("Returns 404 with no page content, no title and no text", "Page is a redirect stub", "Site blocked our request", "Could not be opened"):
+            self.assertTrue(FETCH_FAIL.search(w), w)
+        for w in ("6 steps to pay, no sample report", "No money-back terms published", "Slow on mobile (4.2 s)"):
+            self.assertFalse(FETCH_FAIL.search(w), w)
+
+    def test_no_validation_test_over_the_year_end_holidays(self):
+        import datetime as dt
+        offer = {"test": {"days": 14}, "build_days": 10}
+        tl = phase4.timeline(offer, 800, 7000, today=dt.date(2026, 12, 11))
+        ends = [s_["by"] for s_ in tl["steps"] if s_["goal"].startswith("validation test ends")][0]
+        starts = [s_["by"] for s_ in tl["steps"] if "moved past the year-end holidays" in s_["goal"]]
+        self.assertTrue(starts and starts[0] >= "2027-01-04")
+        self.assertGreaterEqual(ends, "2027-01-18")
+        tl2 = phase4.timeline(offer, 800, 7000, today=dt.date(2026, 9, 1))     # far from the holidays: unchanged
+        self.assertEqual([s_["by"] for s_ in tl2["steps"] if s_["goal"].startswith("validation test ends")][0], "2026-09-15")
 
 
 if __name__ == "__main__":
