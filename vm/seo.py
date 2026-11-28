@@ -203,6 +203,7 @@ def _parse_serp_items(items):
     organic, features = [], {"ai_overview": False, "paid": 0, "people_also_ask": False, "video": False,
                              "local_pack": False, "featured_snippet": False}
     paid, aio_refs, questions = [], [], []
+    aio = {"text": "", "refs": [], "loaded": False}
     for it in items:
         t = it.get("type")
         if t == "organic":
@@ -219,9 +220,10 @@ def _parse_serp_items(items):
         elif t == "ai_overview":
             features["ai_overview"] = True
             aio_refs += _domains_in(it)
+            aio = _aio_of(it)
         elif t in features:
             features[t] = True
-    return organic, paid, features, aio_refs, questions
+    return organic, paid, features, aio_refs, questions, aio
 
 
 def degraded(items):
@@ -245,16 +247,29 @@ def serp_snapshot(keyword, loc, lang):
 def serp(keyword, loc, lang, depth=None):
     """Google page 1. Uses the live page; if Google served a reduced (degraded) page, the organic results come from the
     newest real database snapshot instead, and only the AI Overview check is taken from the live page."""
-    res = post("serp/google/organic/live/advanced",
-               {"keyword": clean_kw(keyword), "location_code": loc, "language_code": lang,
-                "depth": depth or K("serp_depth"), "device": "desktop"})
+    ep = "serp/google/organic/live/advanced"
+    task = {"keyword": clean_kw(keyword), "location_code": loc, "language_code": lang, "depth": depth or K("serp_depth"), "device": "desktop"}
+    full = dict(task, load_async_ai_overview=True)   # also loads an AI answer that Google fills in after the page (so we can read what it says)
+    res = store.cache_get(_key(ep, full), S.cache_days)
+    if res is None:
+        res = store.cache_get(_key(ep, task), S.cache_days)   # a page bought before the AI text was read
+        if res is None or any(i.get("type") == "ai_overview" and not (i.get("markdown") or i.get("items")) for i in ((res[0].get("items") or []) if res else [])):
+            try:
+                res = post(ep, full)
+            except (DFSError, budget.BudgetExceeded):
+                if res is None:
+                    raise
+        else:
+            budget.record("dataforseo", ep, 0, counted=False, cached=True)
+    else:
+        budget.record("dataforseo", ep, 0, counted=False, cached=True)
     items = (res[0].get("items") or []) if res else []
-    organic, paid, features, aio_refs, questions = _parse_serp_items(items)
+    organic, paid, features, aio_refs, questions, aio = _parse_serp_items(items)
     source = "live"
     if degraded(items):
         snap = serp_snapshot(keyword, loc, lang)
         if snap:
-            o2, p2, f2, _a, q2 = _parse_serp_items(snap.get("items") or [])
+            o2, p2, f2, _a, q2, _x = _parse_serp_items(snap.get("items") or [])
             live_aio = features["ai_overview"]
             organic, paid, questions = o2, p2, (q2 or questions)
             features = dict(f2, ai_overview=live_aio or f2["ai_overview"])
@@ -262,7 +277,33 @@ def serp(keyword, loc, lang, depth=None):
         else:
             source = "live (reduced page, no snapshot)"
     return {"keyword": keyword, "organic": organic, "paid": paid, "features": features, "ai_overview_sources": sorted(set(aio_refs)),
-            "questions": questions, "source": source}
+            "ai_overview": aio, "questions": questions, "source": source}
+
+
+def _aio_of(it):
+    """What a Google AI Overview says and which pages it links: {'text', 'refs': [{'domain', 'title'}], 'loaded'}.
+    loaded False = Google showed an AI answer but its text was not delivered (never read that as 'says nothing')."""
+    parts = [it.get("markdown") or ""] + [(x.get("markdown") or x.get("text") or "") for x in (it.get("items") or [])]
+    text = "\n".join(p for p in parts if p)
+    text = re.sub(r"\[\[\d+\]\]\([^)]*\)", "", text)                       # footnote marks
+    text = re.sub(r"\[([^\]]*)\]\((?:https?://)[^)]*\)", r"\1", text)      # keep the link words, drop the address
+    text = re.sub(r"\[Highlight (start|end)\]|Loading AI-generated quiz\.\.\.", " ", text)
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    refs, seen = [], set()
+
+    def walk(o):
+        if isinstance(o, dict):
+            d = (o.get("domain") or "").lower().removeprefix("www.")
+            if d and d != "google.com" and o.get("type") in ("ai_overview_reference", "ai_overview_link", None) and (d, o.get("title")) not in seen and (o.get("title") or o.get("url")):
+                seen.add((d, o.get("title")))
+                refs.append({"domain": d, "title": (o.get("title") or "")[:120]})
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(it)
+    return {"text": text[:2500], "refs": refs[:12], "loaded": bool(text)}
 
 
 def _domains_in(obj):

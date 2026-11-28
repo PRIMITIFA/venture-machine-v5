@@ -941,6 +941,17 @@ def build_html(slug):
                        "<b>%s of %s</b> searches. <b>What this means:</b> ranking on Google is not enough any more; you also need to be one of the sites AI quotes."
                        % (len(aiv.get("prompts") or []), e(first_q), e(", ".join(r["site"] for r in rec[:3]) or "nobody in particular"),
                           len(share), rivals_in, aio.get("with_ai_answer", 0), aio.get("searches", 0))))
+        ans_ = aio.get("answers") or []
+        if ans_:
+            cn_ = aio.get("counts") or {}
+            order_ = {"answers it itself": 0, "mixed": 1, "sends visitors": 2, "not read": 3}
+            H.append("<h3>What Google's AI answer says on our searches</h3><p>An AI answer is not a problem by itself. On <b>%d</b> searches it points people to websites, on <b>%d</b> it is mixed, "
+                     "and on <b>%d</b> it gives the whole answer itself, so fewer people click.%s Only the last two kinds lower the click estimate.</p>"
+                     % (cn_.get("sends visitors", 0), cn_.get("mixed", 0), cn_.get("answers it itself", 0),
+                        (" %d could not be read." % cn_["not read"]) if cn_.get("not read") else "") +
+                     table([{"k": a_["keyword"], "s": a_.get("says") or "(text not delivered)", "n": ", ".join(a_.get("sites_named") or [])[:140] or "-",
+                             "f": a_.get("effect", "")} for a_ in sorted(ans_, key=lambda a_: order_.get(a_.get("effect"), 9))],
+                           ["k", "s", "n", "f"], ["Search", "What the AI gives", "Sites it names", "Effect on us"]))
         t1 = table([{"s": r["site"], "n": r["times"]} for r in rec[:12]], ["s", "n"], ["Site", "Times quoted"], right=("n",))
         t2 = table([{"s": d_, "n": n_} for d_, n_ in sorted(share.items(), key=lambda x: -x[1])], ["s", "n"], ["Rival", "AI answers that mention it"], right=("n",))
         H.append("<div class=two><div><h3>Sites AI recommends</h3>%s</div><div><h3>Google's top rivals in AI answers</h3>%s</div></div>" % (t1, t2))

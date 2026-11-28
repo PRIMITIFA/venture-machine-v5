@@ -183,6 +183,61 @@ Our data sources and their cost are in 'how'. Say if competitors sell cheaper th
     return Result("pass", summary)
 
 
+# ---------------- Google AI answers: what they say ----------------
+class AioOne(BaseModel):
+    keyword: str
+    says: str = Field(description="what the AI answer gives the searcher, one plain sentence")
+    effect: Literal["sends visitors", "mixed", "answers it itself"] = Field(description="sends visitors = it names or links specific websites, courses, tools or official pages the searcher must go to for what they want. answers it itself = it hands over the whole thing wanted right there (full facts, its own quiz, a full list), so there is little reason to click. mixed = part answer, part pointing to sites")
+    sites_named: list[str] = Field(description="websites or brands the answer names or links as places to go, as written; empty if none")
+    our_kind_named: bool = Field(description="true if it names or links a site of the same kind as the idea (a seller or provider of this product)")
+
+
+class Aio(BaseModel):
+    answers: list[AioOne]
+
+
+AIO_EFFECT_FACTOR = {"sends visitors": 1.0, "mixed": 0.8, "answers it itself": 0.5}   # share of the usual clicks left (rule of thumb, ASSUMPTION)
+
+
+def ai_overviews(c):
+    """Read what Google's AI answer SAYS on each of our searches: an answer that names sites to go to is not a loss, an answer
+    that hands over the whole thing is. Written once to 12_ai_overviews.json; later steps read the file."""
+    if c.has("12_ai_overviews.json"):
+        return c.read("12_ai_overviews.json")
+    rows, n = [], 0
+    for raw in c.read("09_serp_raw.json", default=[]):
+        if raw.get("error") or raw.get("off_topic"):
+            continue
+        n += 1
+        try:
+            sr = seo.serp(raw["keyword"], c.loc, c.lang)
+        except Exception:
+            continue
+        if sr["features"].get("ai_overview"):
+            a = sr.get("ai_overview") or {}
+            rows.append({"keyword": raw["keyword"], "loaded": bool(a.get("loaded")), "text": a.get("text", ""), "refs": a.get("refs") or [],
+                         "cited_domains": sr.get("ai_overview_sources") or []})
+    read = [r for r in rows if r["loaded"]]
+    by = {}
+    for i in range(0, len(read), 20):
+        part = read[i:i + 20]
+        out = ai.ask_json(
+            f"""Google shows its own AI answer above the results on these searches. The idea we are checking: {c.v['one_liner']}
+For EACH search, read the AI answer text and the pages it links, and say what it gives the searcher and what that does to a
+website that wants this visitor. Judge only from the text and links given. Return one entry per search, same keyword spelling.""",
+            Aio, smart=False, context=[{"keyword": r["keyword"], "ai_answer_text": r["text"][:1800], "pages_it_links": r["refs"], "domains_cited": r["cited_domains"][:10]} for r in part])
+        by.update({a.keyword: a.model_dump() for a in out.answers})
+    for r in rows:
+        j = by.get(r["keyword"])
+        r.update({"says": j["says"], "effect": j["effect"], "sites_named": j["sites_named"], "our_kind_named": j["our_kind_named"]} if (j and r["loaded"])
+                 else {"says": "", "effect": "not read", "sites_named": [], "our_kind_named": False})
+        r["text"] = r["text"][:600]
+    counts = {k: sum(1 for r in rows if r["effect"] == k) for k in ("sends visitors", "mixed", "answers it itself", "not read")}
+    d = {"searches": n, "with_ai_answer": len(rows), "counts": counts, "answers": rows}
+    c.write("12_ai_overviews.json", d)
+    return d
+
+
 # ---------------- 12 Market size + buyers ----------------
 CTR_TOP5 = 0.28 + 0.15 + 0.10 + 0.07 + 0.05  # typical organic CTR of positions 1-5
 AIO_CLICK_FACTOR = 0.6  # a search with a Google AI answer sends roughly 60% of the usual clicks (rule of thumb)
@@ -267,7 +322,12 @@ def b12_market(c):
     kws = read_csv(c.path("08_keywords_clean.csv"))
     serps_ = [s for s in c.read("09_serp_raw.json", default=[]) if not s.get("error") and not s.get("off_topic")]
     aio_share = sum(1 for s in serps_ if (s.get("features") or {}).get("ai_overview")) / max(len(serps_), 1)
-    aio_factor = round(1 - (1 - AIO_CLICK_FACTOR) * aio_share, 2)  # searches with a Google AI answer send fewer clicks
+    # an AI answer costs clicks only as far as it answers the search itself; one that names sites to go to costs nothing
+    if c.has("12_ai_overviews.json"):
+        c.path("12_ai_overviews.json").unlink()
+    aio = ai_overviews(c)
+    eff = {a["keyword"]: AIO_EFFECT_FACTOR.get(a["effect"], AIO_CLICK_FACTOR) for a in aio["answers"]}
+    aio_factor = round(sum(eff.get(s["keyword"], 1.0) for s in serps_) / max(len(serps_), 1), 2)
     bv = buy_volume(kws)
     clicks = bv * CTR_TOP5 * aio_factor
     price, price_src = out.typical_price_usd, "AI from block 11 pricing"
@@ -278,7 +338,7 @@ def b12_market(c):
     bottom_up = clicks * conv * price * 12
     goal = S.min_market_usd  # size bar, not a sales goal
     d = {"bottom_up_usd_year": round(bottom_up),
-         "buying_searches_month": int(bv), "clicks_month": round(clicks, 1), "ctr_top5": CTR_TOP5, "conversion_used": conv, "volume_split": volume_split(kws), "aio_share": round(aio_share, 2), "aio_click_factor": aio_factor,
+         "buying_searches_month": int(bv), "clicks_month": round(clicks, 1), "ctr_top5": CTR_TOP5, "conversion_used": conv, "volume_split": volume_split(kws), "aio_share": round(aio_share, 2), "aio_click_factor": aio_factor, "aio_counts": aio["counts"],
          "price_used_usd": price, "price_source": price_src,
          "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_traffic_history": history,
          "rivals_traffic_trend_12m_pct": rivals_trend,
@@ -313,11 +373,18 @@ def market_result(d, bottom_up, at=""):
     return Result("warn", summary + "; below the bar (search market of the size we want AND an underserved segment): TEST FIRST at most")
 
 
+def _aio_words(cn):
+    if not cn:
+        return ""
+    return (f": {cn.get('sends visitors', 0)} point to websites, {cn.get('mixed', 0)} are mixed, {cn.get('answers it itself', 0)} answer it themselves"
+            + (f", {cn['not read']} could not be read" if cn.get("not read") else "") + "; only the last kinds cost clicks, an assumption")
+
+
 def market_method(d, price, price_src):
     """The formula in words, built from the same numbers the result is computed from (so text and number cannot differ)."""
     bv, clicks, conv = num(d["buying_searches_month"]), num(d["clicks_month"]), num(d["conversion_used"])
     return (f"{int(bv)} buying searches/mo (a rival's bare brand name counts 10%) x top-5 CTR {num(d['ctr_top5']):.0%} x {d['aio_click_factor']} "
-            f"(Google shows its own AI answer on {num(d['aio_share']):.0%} of these searches) = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) "
+            f"(Google shows its own AI answer on {num(d['aio_share']):.0%} of these searches{_aio_words(d.get('aio_counts'))}) = {int(clicks)} clicks/mo x {conv:.1%} conversion (ASSUMPTION) "
             f"x ${price:,.2f} ({price_src}) x 12 = ${clicks * conv * price * 12:,.0f} a year. This is the money reachable through Google search only, not other channels")
 
 
@@ -472,7 +539,7 @@ def ai_visibility(c, comps, n_prompts=None):
                 f"{', '.join(d for d, _ in top_rec[:3]) or 'nobody'}; Google AI answer on {aio_count}/{aio_total} searches")
     return {"headline": headline, "prompts": prompts, "answers": [dict(a, text=a["text"][:1500]) for a in answers],
             "rival_share": share, "answers_ok": len(ok), "ai_recommends": [{"site": d, "times": n} for d, n in top_rec],
-            "google_ai_overview": {"searches": aio_total, "with_ai_answer": aio_count,
+            "google_ai_overview": {"searches": aio_total, "with_ai_answer": aio_count, "counts": ai_overviews(c).get("counts"), "answers": ai_overviews(c).get("answers"),
                                    "cited_sites": [{"site": d, "times": n} for d, n in sorted(aio_sources.items(), key=lambda x: -x[1])[:15]]},
                                    "ai_trusted_sources": mentions}
 
