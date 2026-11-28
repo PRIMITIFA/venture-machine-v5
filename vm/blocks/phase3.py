@@ -21,7 +21,7 @@ class UxOne(BaseModel):
     steps_to_checkout_estimate: Optional[int] = Field(default=None, description="estimate from the pages seen; null if unknown")
     weaknesses: list[str] = Field(description="concrete, e.g. '6 steps to pay, no sample report'")
     strengths: list[str]
-    look: Literal["modern", "average", "dated", "not seen"] = Field(default="not seen", description="how the site LOOKS in its screenshot: modern = clean current design, one clear action; dated = old-style layout, clutter, many menus, stock badges; 'not seen' when there is no screenshot or it shows an error or block page")
+    look: Literal["modern", "AI-generic", "average", "dated", "not seen"] = Field(default="not seen", description="how the site LOOKS in its screenshot: modern = a clearly hand-designed, distinctive current design with one clear action (rare). AI-generic = clean but the stock look of an AI-built site: big centered or left headline, two buttons, a row of stat numbers or four feature cards, soft gradient, default fonts, sometimes fake ratings or a chat bubble; tidy is NOT enough for 'modern'. dated = old-style layout, clutter, many menus, stock badges; 'not seen' when there is no screenshot or it shows an error or block page")
     look_evidence: str = Field(default="", description="what the screenshot shows that led to the look rating, in one or two plain sentences; empty when not seen")
 
 
@@ -78,7 +78,7 @@ def b10_ux(c):
         f"""Block 10. UX + trust audit of the top-5 competitors of: {c.v['one_liner']}
 For each: estimate steps from landing to payment (from the pages and screenshots; null if unknown), list concrete
 weaknesses (missing sample, no reviews, slow, no prices, many steps, weak mobile, old site...) and strengths.
-Rate how each site LOOKS from its screenshot (modern / average / dated) and say what you see; a rival with no screenshot,
+Rate how each site LOOKS from its screenshot (modern / AI-generic / average / dated; a tidy site with the stock AI-built layout is AI-generic, not modern) and say what you see; a rival with no screenshot,
 or whose screenshot shows an error or block page, is "not seen". A page read with "real browser" or "by hand" has no checkout or
 mobile data: treat those two as unknown, not as missing.
 'reviews' is the rival's public Trustpilot profile. Many reviews with a high rating is a strength (name the count and rating).

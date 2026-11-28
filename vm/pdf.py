@@ -910,8 +910,8 @@ def build_html(slug):
                      "<p class='small mute'>* What those visitors would cost if bought as Google ads. Visits are DataForSEO estimates (the latest month of the same history shown in the market part). "
                      "** Average of the last 3 months against the average of the first 3 of the 12, so it differs from comparing two single months. "
                      "*** When the web address was first registered; the business on it can be much younger. Phone speed is Google's Lighthouse score; under 50 is slow, 90+ is fast. "
-                     "**** From a screenshot of the site: modern, average or dated; 'not seen' means no screenshot could be taken.</p>" +
-                     "".join("<p class=small><b>%s</b> looks %s: %s</p>" % (e(d_), e(x_["look"]), e(x_["look_evidence"])) for d_, x_ in uxd.items() if x_.get("look") in ("modern", "average", "dated") and x_.get("look_evidence")))
+                     "**** From a screenshot of the site: modern (hand-designed), AI-generic (tidy but the stock AI-built look), average or dated; 'not seen' means no screenshot could be taken.</p>" +
+                     "".join("<p class=small><b>%s</b> looks %s: %s</p>" % (e(d_), e(x_["look"]), e(x_["look_evidence"])) for d_, x_ in uxd.items() if x_.get("look") in ("modern", "AI-generic", "average", "dated") and x_.get("look_evidence")))
             young = [r_ for r_ in rows if ("(0 yrs)" in r_["y"] or "(1 yrs)" in r_["y"]) and r_["vn"] >= 100]
             if young:
                 H.append("<p><b>Good sign:</b> %s %s on a web address less than 2 years old and already gets 100+ Google visits a month, so new sites can get in.</p>"

@@ -400,7 +400,7 @@ swap the keyword in a template are not allowed.
 EDGE SCALE (fixed): 1 = the top rivals are better than our offer on every point. 2 = we only match them. 3 = we beat the top PAID rivals on one measured point.
 4 = we beat every top paid rival on at least two measured points (for example price and the look or ease of buying shown in rival_audit) and none of them sells our exact offer.
 5 = as 4, plus something rivals cannot copy within months (own data, an exclusive channel, an official source).
-Use rival_audit: 'look' is what the screenshots of the rivals showed. A rival marked 'not seen' or could_not_open is UNKNOWN: it is neither strong nor weak.
+Use rival_audit: 'look' is what the screenshots of the rivals showed. Only a rival rated 'modern' matches a hand-designed site on look; 'AI-generic', 'average' and 'dated' rivals can be beaten on look, 'AI-generic' by less than 'dated'. A rival marked 'not seen' or could_not_open is UNKNOWN: it is neither strong nor weak.
 A rival's strengths in rival_audit (guarantee, free sample, pass-rate claim, long history) count for the rival. A rival with hundreds of Trustpilot reviews and a rating of 4.5 or more has trust we do not have yet: that counts for the rival. Complaints of its low-star reviewers that our offer fixes count for us.
 A free alternative counts against us only when rival_audit shows it covers the same exam.
 RULES: sell only the chosen offer at its price, in USD (never euros). One main keyword belongs to ONE page only; a page
