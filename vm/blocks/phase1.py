@@ -143,6 +143,7 @@ def revenue_proof(c, intake, competitors):
             if dom and dom not in seen and len(seen) < 4:
                 seen.add(dom)
                 pr["ads"].append(proof.ads(name, dom))
+                pr.setdefault("reviews", []).append(dict(proof.reviews(dom), name=name, low_star_text=""))
     except Exception as ex:  # proof is extra evidence: it must never break the run
         pr["note"] = f"proof step failed: {type(ex).__name__}: {str(ex)[:160]}"
     c.write("02_proof.json", pr)

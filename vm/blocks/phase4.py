@@ -401,7 +401,8 @@ EDGE SCALE (fixed): 1 = the top rivals are better than our offer on every point.
 4 = we beat every top paid rival on at least two measured points (for example price and the look or ease of buying shown in rival_audit) and none of them sells our exact offer.
 5 = as 4, plus something rivals cannot copy within months (own data, an exclusive channel, an official source).
 Use rival_audit: 'look' is what the screenshots of the rivals showed. A rival marked 'not seen' or could_not_open is UNKNOWN: it is neither strong nor weak.
-A rival's strengths in rival_audit (guarantee, free sample, pass-rate claim, long history) count for the rival. A free alternative counts against us only when rival_audit shows it covers the same exam.
+A rival's strengths in rival_audit (guarantee, free sample, pass-rate claim, long history) count for the rival. A rival with hundreds of Trustpilot reviews and a rating of 4.5 or more has trust we do not have yet: that counts for the rival. Complaints of its low-star reviewers that our offer fixes count for us.
+A free alternative counts against us only when rival_audit shows it covers the same exam.
 RULES: sell only the chosen offer at its price, in USD (never euros). One main keyword belongs to ONE page only; a page
 without its own cluster must say "support page, no target keyword" as its data source and does not count toward the 20.
 The home page and the money page must target clusters with intent buy / competitor / brand-model, never an 'info' or 'brand' cluster.
@@ -414,7 +415,7 @@ Do not write about a sales goal or target revenue. Never give away free the same
                                    "validation_test": test, "money_reachable_through_google_search_usd_year": round(market),
                                    "chosen_price_usd": offer.get("price_usd") or c.v["data"].get("chosen_price_usd"),
                                    "eeat": c.read("03_eeat_quality.json"), "gap": c.read("13_competitor_business.json").get("identified_gap"),
-                                   "rival_audit": [{k: x.get(k) for k in ("domain", "look", "look_evidence", "weaknesses", "strengths", "mobile_speed_score", "steps_to_checkout_estimate", "could_not_open")}
+                                   "rival_audit": [{k: x.get(k) for k in ("domain", "look", "look_evidence", "weaknesses", "strengths", "mobile_speed_score", "steps_to_checkout_estimate", "could_not_open", "reviews")}
                                                    for x in c.read("12_competitor_ux.json")["competitors"]],
                                    "questions_people_ask": [q["question"] for q in c.read("15_questions.json", default=[])][:30],
                                    "searches_rivals_get_we_missed": read_csv(c.path("15_keyword_gap.csv"))[:20] if c.has("15_keyword_gap.csv") else []})

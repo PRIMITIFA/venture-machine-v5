@@ -293,6 +293,55 @@ def ads(name, domain):
     return out
 
 
+def _read_raw(url, max_chars=30000):
+    """Page text through the owner's browser command whatever the status ('' when the command is not set or failed)."""
+    if not S.browser_cmd:
+        return ""
+    try:
+        p = subprocess.run(S.browser_cmd.split() + [url, "--max", str(max_chars)], capture_output=True, text=True, timeout=120)
+        return json.loads(p.stdout).get("text", "") or ""
+    except Exception:
+        return ""
+
+
+def reviews(domain):
+    """Public buyer reviews of a rival on Trustpilot: how many, the rating, how many in the last 12 months, and what the
+    1 and 2 star reviewers complain about. Every review is a real past customer, so the count is a floor on buyers.
+    checked False = could not be read (never read that as 'no reviews'); found False = the rival has no profile."""
+    out = {"domain": domain, "source": "trustpilot", "url": f"https://www.trustpilot.com/review/{domain}", "checked": False, "found": False,
+           "count": None, "rating": None, "last_12_months": None, "low_star_pct": None, "summary": "", "low_star_text": ""}
+    if not S.browser_cmd or not domain or domain in SHARED_HOSTS:
+        return out
+    key = f"proof:reviews:{domain}"
+    hit = store.cache_get(key, 14)
+    if hit is not None:
+        return hit
+    t = _read_raw(out["url"] + "?stars=1&stars=2")
+    if not t:
+        return out
+    out["checked"] = True
+    m = re.search(r"All reviews\s*\(([\d,]+)\)", t) or re.search(r"Reviews\s+([\d,]+)", t)
+    if "could not be found" in t or not m:
+        store.cache_put(key, out)
+        return out
+    out["found"] = True
+    out["count"] = int(m.group(1).replace(",", ""))
+    m = re.search(r"\n\s*([1-5]\.\d)\s*\n", t)
+    out["rating"] = float(m.group(1)) if (m and out["count"]) else None   # a profile with no reviews shows a placeholder rating
+    m = re.search(r"([\d,]+) reviews? in the last 12 months", t)
+    out["last_12_months"] = int(m.group(1).replace(",", "")) if m else None
+    low = [int(x) for x in re.findall(r"[12]-star\s*(\d+)%", t)[:2]]
+    out["low_star_pct"] = sum(low) if low else None
+    m = re.search(r"(Evaluating [\d,]+ reviews?,.*?)(?:See more|\n\n)", t, re.S)
+    out["summary"] = re.sub(r"\s+", " ", m.group(1)).strip()[:600] if m else ""
+    i = t.find("Reset\n")
+    if i > 0 and out["low_star_pct"]:
+        body = re.sub(r"Reply from .*?(?=\nAdvertisement|\n[A-Z]{2}\n|$)", "", t[i + 6:], flags=re.S)   # the rival's own replies are not buyer words
+        out["low_star_text"] = re.sub(r"\n{2,}", "\n", body).strip()[:3000]
+    store.cache_put(key, out)
+    return out
+
+
 def summary(pr):
     """One plain line for the step result."""
     comps = pr.get("comparables") or []

@@ -742,6 +742,16 @@ def build_html(slug):
             H.append("<h3>Do rivals buy ads?</h3><p class=small>From the two public ad libraries. A rival that keeps paying for ads is earning from them, and its buyers do not come from free search alone.</p>" +
                      table([{"n": a_["name"], "m": show(a_.get("meta_ads")), "g": show(a_.get("google_ads"))} for a_ in ads_], ["n", "m", "g"],
                            ["Rival", "Facebook / Instagram ads running", "Google ads"], right=("m", "g")))
+        rv_ = [r_ for r_ in pr.get("reviews") or [] if r_.get("checked")] + [dict(u_["reviews"], name=u_["domain"]) for u_ in (ux or {}).get("competitors", [])
+                                                                              if (u_.get("reviews") or {}).get("checked") and u_["domain"] not in {r_.get("domain") for r_ in pr.get("reviews") or [] if r_.get("checked")}]
+        if rv_:
+            H.append("<h3>What buyers say about rivals (Trustpilot)</h3><p class=small>Every review is a real past customer, so the count is the least number of buyers a rival has had. "
+                     "A rival with no profile has no public reviews: that is unknown, not bad.</p>" +
+                     table([{"n": r_.get("name") or r_["domain"], "c": "{:,}".format(r_["count"]) if r_.get("found") else "no profile",
+                             "y": "{:,}".format(r_["last_12_months"]) if r_.get("last_12_months") is not None else "-",
+                             "r": ("%.1f of 5" % r_["rating"]) if r_.get("rating") else "-",
+                             "l": ("%d%%" % r_["low_star_pct"]) if r_.get("low_star_pct") is not None else "-"} for r_ in rv_], ["n", "c", "y", "r", "l"],
+                           ["Rival", "Reviews, all time", "Reviews, last 12 months", "Rating", "1 and 2 star"], right=("c", "y", "r", "l")))
         ppl_, bc_ = pr.get("people"), pr.get("buyer_count") or {}
         if ppl_:
             H.append("<h3>Counting the buyers</h3><p><b>%s people a year</b> (%s%s; source: %s%s). At %s a customer, a newcomer taking %d%% to %d%% of them earns <b>%s to %s a month</b>, "

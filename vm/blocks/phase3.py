@@ -58,6 +58,8 @@ def b10_ux(c):
         sig = web.signals(p["html"])
         pricing = next((u for u, label in web.links_of(p["html"], p["url"]) if "pric" in u.lower() or "plan" in u.lower()), "")
         sm = web.sitemap(d)
+        from .. import proof as _proof
+        rv = _proof.reviews(d)
         shots = [str(m_png)] if (m_png.exists() and read_with != "plain fetch") else web.screenshots(p["url"], str(shots_dir / d.replace(".", "_"))) if p["status"] == 200 else []
         images += shots[:1]
         more += shots[1:2]
@@ -70,7 +72,7 @@ def b10_ux(c):
         facts.append({"domain": d, "mobile_speed_score": speed, "domain_created": ages.get(d, ""), "status": p["status"], "load_ms": p["ms"], "kb": p["bytes"] // 1024, "title": web.title_of(p["html"]),
                       "trust": sig["trust"], "checkout_provider": sig["checkout"], "mobile_viewport": sig["mobile_viewport"],
                       "pricing_page": pricing, "sitemap_urls": sm["urls"], "sitemap_oldest": sm["oldest"], "sitemap_newest": sm["newest"],
-                      "blocked_or_captcha": d in manual, "screenshots": shots, "read_with": read_with,
+                      "blocked_or_captcha": d in manual, "screenshots": shots, "read_with": read_with, "reviews": rv,
                       "text": web.text_of(p["html"], 2500) if read_with == "plain fetch" else p["html"][:4000]})
     out = ai.ask_json(
         f"""Block 10. UX + trust audit of the top-5 competitors of: {c.v['one_liner']}
@@ -79,12 +81,17 @@ weaknesses (missing sample, no reviews, slow, no prices, many steps, weak mobile
 Rate how each site LOOKS from its screenshot (modern / average / dated) and say what you see; a rival with no screenshot,
 or whose screenshot shows an error or block page, is "not seen". A page read with "real browser" or "by hand" has no checkout or
 mobile data: treat those two as unknown, not as missing.
+'reviews' is the rival's public Trustpilot profile. Many reviews with a high rating is a strength (name the count and rating).
+Turn what the 1 and 2 star reviewers complain about (low_star_text) into weaknesses, in the buyers' own words, short.
+checked false or found false means there are no public reviews to read: that is unknown, never a weakness.
 Use only what the data and screenshots show.{c.note()}""",
         Ux, smart=False, images=(images + more)[:10], context={"measured": [{k: v for k, v in f.items() if k != "screenshots"} for f in facts]})
     by = {u.domain: u.model_dump() for u in out.competitors}
     rows = [dict(f, **{k: v for k, v in by.get(f["domain"], {}).items() if k != "domain"}) for f in facts]
     for r in rows:
         r.pop("text", None)
+        if isinstance(r.get("reviews"), dict):
+            r["reviews"] = {k: v for k, v in r["reviews"].items() if k != "low_star_text"}
         # a page we could not open says nothing about the rival: it is "not checked", never a weakness and never proof the rival is gone
         failed = num(r.get("status")) >= 400 or r.get("blocked_or_captcha")
         kept = [w for w in (r.get("weaknesses") or []) if not FETCH_FAIL.search(w)]
