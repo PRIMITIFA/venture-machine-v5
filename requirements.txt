@@ -1,5 +1,8 @@
 anthropic>=1.0
 pydantic>=2.6
 httpx>=0.27
-# optional: competitor screenshots in block 10
+# optional: competitor screenshots in block 10 (then: python -m playwright install chromium)
 # playwright>=1.45
+# optional: cleaner page text for the rival audit
+# trafilatura>=2.0
+# optional, free phone-speed scores instead of a paid call: npm install -g lighthouse

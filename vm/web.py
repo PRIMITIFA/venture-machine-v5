@@ -34,6 +34,14 @@ def _fetch(url, timeout=20):
 
 
 def text_of(html, limit=8000):
+    """Readable text of a page. With trafilatura installed the main content comes first (menus and footers dropped)."""
+    try:
+        import trafilatura
+        main = trafilatura.extract(html, include_comments=False, include_tables=True, favor_recall=True) or ""
+        if len(main) > 400:
+            return re.sub(r"[ \t]+", " ", main).strip()[:limit]
+    except Exception:
+        pass
     h = re.sub(r"(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\1>", " ", html)
     h = re.sub(r"(?s)<[^>]+>", " ", h)
     t = re.sub(r"\s+", " ", htmlmod.unescape(h)).strip()

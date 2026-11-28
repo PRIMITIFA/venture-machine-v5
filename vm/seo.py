@@ -466,10 +466,40 @@ def domain_ages(domains):
     return {it.get("domain"): (it.get("created_datetime") or "")[:10] for it in ((res[0].get("items") or []) if res else [])}
 
 
+def _lighthouse_local(url, mobile=True):
+    """Performance score 0-100 from a local Lighthouse run, cached 30 days. None when Lighthouse is not installed or the run failed."""
+    import shutil
+    import subprocess
+    import os
+    exe = shutil.which("lighthouse") if os.environ.get("VM_LIGHTHOUSE", "").lower() == "local" else None
+    if not exe:
+        return None
+    key = _key("local/lighthouse", {"url": url, "mobile": mobile})
+    hit = store.cache_get(key, S.cache_days)
+    if hit is not None:
+        return hit.get("score")
+    cmd = [exe, url, "--only-categories=performance", "--output=json", "--quiet", "--chrome-flags=--headless=new --no-first-run", "--max-wait-for-load=45000"]
+    if not mobile:
+        cmd.append("--preset=desktop")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=150)
+        j = json.loads(r.stdout)
+        sc = j["categories"]["performance"]["score"]
+        if j.get("runtimeError") or not isinstance(sc, (int, float)):
+            return None
+    except Exception:
+        return None
+    store.cache_put(key, {"score": round(sc * 100)})
+    return round(sc * 100)
+
+
 def speed_score(url, mobile=True):
     """Google Lighthouse performance score 0-100 (mobile by default)."""
     if not url.startswith("http"):
         url = "https://" + url
+    local = _lighthouse_local(url, mobile)   # free, when VM_LIGHTHOUSE=local and Google's own Lighthouse tool is installed (npm install -g lighthouse)
+    if local is not None:
+        return local
     res = post("on_page/lighthouse/live/json", {"url": url, "for_mobile": mobile, "categories": ["performance"]})
     sc = ((res[0].get("categories") or {}).get("performance") or {}).get("score") if res else None
     return round(sc * 100) if isinstance(sc, (int, float)) else None
