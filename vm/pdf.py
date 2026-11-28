@@ -893,12 +893,15 @@ def build_html(slug):
                              "a": money(t_.get("ads_value")) if t_.get("ads_value") is not None else "?",
                              "t": ("%+d%%" % tr_) if tr_ is not None else "-",
                              "y": ("%s (%d yrs)" % (age[:4], max(0, int(store.now()[:4]) - int(age[:4])))) if age[:4].isdigit() else "?",
-                             "sp": ("%s/100" % u_["mobile_speed_score"]) if u_.get("mobile_speed_score") is not None else "?"})
-            H.append("<h3>How big each rival is</h3>" + table(rows, ["s", "v", "a", "t", "y", "sp"],
-                     ["Site", "Google visits a month", "Worth in ads a month*", "Visits, last 12 months**", "Domain registered***", "Phone speed"], right=("v", "a", "t")) +
+                             "sp": ("%s/100" % u_["mobile_speed_score"]) if u_.get("mobile_speed_score") is not None else "?",
+                             "lk": u_.get("look") or "not seen"})
+            H.append("<h3>How big each rival is</h3>" + table(rows, ["s", "v", "a", "t", "y", "sp", "lk"],
+                     ["Site", "Google visits a month", "Worth in ads a month*", "Visits, last 12 months**", "Domain registered***", "Phone speed", "How it looks****"], right=("v", "a", "t")) +
                      "<p class='small mute'>* What those visitors would cost if bought as Google ads. Visits are DataForSEO estimates (the latest month of the same history shown in the market part). "
                      "** Average of the last 3 months against the average of the first 3 of the 12, so it differs from comparing two single months. "
-                     "*** When the web address was first registered; the business on it can be much younger. Phone speed is Google's Lighthouse score; under 50 is slow, 90+ is fast.</p>")
+                     "*** When the web address was first registered; the business on it can be much younger. Phone speed is Google's Lighthouse score; under 50 is slow, 90+ is fast. "
+                     "**** From a screenshot of the site: modern, average or dated; 'not seen' means no screenshot could be taken.</p>" +
+                     "".join("<p class=small><b>%s</b> looks %s: %s</p>" % (e(d_), e(x_["look"]), e(x_["look_evidence"])) for d_, x_ in uxd.items() if x_.get("look") in ("modern", "average", "dated") and x_.get("look_evidence")))
             young = [r_ for r_ in rows if ("(0 yrs)" in r_["y"] or "(1 yrs)" in r_["y"]) and r_["vn"] >= 100]
             if young:
                 H.append("<p><b>Good sign:</b> %s %s on a web address less than 2 years old and already gets 100+ Google visits a month, so new sites can get in.</p>"

@@ -21,6 +21,8 @@ class UxOne(BaseModel):
     steps_to_checkout_estimate: Optional[int] = Field(default=None, description="estimate from the pages seen; null if unknown")
     weaknesses: list[str] = Field(description="concrete, e.g. '6 steps to pay, no sample report'")
     strengths: list[str]
+    look: Literal["modern", "average", "dated", "not seen"] = Field(default="not seen", description="how the site LOOKS in its screenshot: modern = clean current design, one clear action; dated = old-style layout, clutter, many menus, stock badges; 'not seen' when there is no screenshot or it shows an error or block page")
+    look_evidence: str = Field(default="", description="what the screenshot shows that led to the look rating, in one or two plain sentences; empty when not seen")
 
 
 class Ux(BaseModel):
@@ -31,7 +33,7 @@ def b10_ux(c):
     comps = c.read("11_top_competitors.json")
     shots_dir = c.path("shots")
     shots_dir.mkdir(exist_ok=True)
-    facts, images, manual = [], [], []
+    facts, images, more, manual = [], [], [], []
     try:
         ages = seo.domain_ages([x["domain"] for x in comps])
     except seo.DFSError:
@@ -39,12 +41,27 @@ def b10_ux(c):
     for x in comps:
         d = x["domain"]
         p = web.fetch(d)
+        read_with = "plain fetch"
+        if p["status"] != 200 or web.blocked(p):
+            # the rival may only refuse plain fetching: read it the way a visitor does before calling it "could not open"
+            from .. import proof
+            btext = proof.read_page(p["url"] if p["status"] else "https://" + d, 6000)
+            if len(btext) > 400:
+                p = dict(p, status=200, html=btext, bytes=len(btext), error="")
+                read_with = "real browser"
+        # a page the owner (or the boss) opened by hand: shots/<domain>-manual.png and/or shots/<domain>-manual.txt beat a failed fetch
+        m_png, m_txt = shots_dir / (d.replace(".", "_") + "-manual.png"), shots_dir / (d.replace(".", "_") + "-manual.txt")
+        if (p["status"] != 200 or web.blocked(p)) and m_txt.exists():
+            mt = m_txt.read_text(encoding="utf-8")
+            p = dict(p, status=200, html=mt, bytes=len(mt), error="")
+            read_with = "by hand"
         sig = web.signals(p["html"])
         pricing = next((u for u, label in web.links_of(p["html"], p["url"]) if "pric" in u.lower() or "plan" in u.lower()), "")
         sm = web.sitemap(d)
-        shots = web.screenshots(p["url"], str(shots_dir / d.replace(".", "_"))) if p["status"] == 200 else []
-        images += shots[:2]
-        if web.blocked(p):
+        shots = [str(m_png)] if (m_png.exists() and read_with != "plain fetch") else web.screenshots(p["url"], str(shots_dir / d.replace(".", "_"))) if p["status"] == 200 else []
+        images += shots[:1]
+        more += shots[1:2]
+        if web.blocked(p) and read_with == "plain fetch":
             manual.append(d)
         try:
             speed = seo.speed_score(p["url"] if p["status"] == 200 else d)
@@ -53,13 +70,17 @@ def b10_ux(c):
         facts.append({"domain": d, "mobile_speed_score": speed, "domain_created": ages.get(d, ""), "status": p["status"], "load_ms": p["ms"], "kb": p["bytes"] // 1024, "title": web.title_of(p["html"]),
                       "trust": sig["trust"], "checkout_provider": sig["checkout"], "mobile_viewport": sig["mobile_viewport"],
                       "pricing_page": pricing, "sitemap_urls": sm["urls"], "sitemap_oldest": sm["oldest"], "sitemap_newest": sm["newest"],
-                      "blocked_or_captcha": d in manual, "screenshots": shots, "text": web.text_of(p["html"], 2500)})
+                      "blocked_or_captcha": d in manual, "screenshots": shots, "read_with": read_with,
+                      "text": web.text_of(p["html"], 2500) if read_with == "plain fetch" else p["html"][:4000]})
     out = ai.ask_json(
         f"""Block 10. UX + trust audit of the top-5 competitors of: {c.v['one_liner']}
 For each: estimate steps from landing to payment (from the pages and screenshots; null if unknown), list concrete
 weaknesses (missing sample, no reviews, slow, no prices, many steps, weak mobile, old site...) and strengths.
+Rate how each site LOOKS from its screenshot (modern / average / dated) and say what you see; a rival with no screenshot,
+or whose screenshot shows an error or block page, is "not seen". A page read with "real browser" or "by hand" has no checkout or
+mobile data: treat those two as unknown, not as missing.
 Use only what the data and screenshots show.{c.note()}""",
-        Ux, smart=False, images=images[:6], context={"measured": [{k: v for k, v in f.items() if k != "screenshots"} for f in facts]})
+        Ux, smart=False, images=(images + more)[:10], context={"measured": [{k: v for k, v in f.items() if k != "screenshots"} for f in facts]})
     by = {u.domain: u.model_dump() for u in out.competitors}
     rows = [dict(f, **{k: v for k, v in by.get(f["domain"], {}).items() if k != "domain"}) for f in facts]
     for r in rows:

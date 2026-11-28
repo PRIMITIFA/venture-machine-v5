@@ -1,4 +1,4 @@
-"""Plain web fetching: pages, text, sitemaps, trust signals, screenshots (optional Playwright)."""
+"""Plain web fetching: pages, text, sitemaps, trust signals, screenshots (real browser command, Playwright or headless Chrome)."""
 import html as htmlmod
 import re
 import time
@@ -9,8 +9,19 @@ import httpx
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 
 
-def fetch(url, timeout=20):
-    """Returns dict(url, status, ms, bytes, html, error). Never raises."""
+def fetch(url, timeout=20, retries=1):
+    """Returns dict(url, status, ms, bytes, html, error). Never raises. A network error or a 5xx answer is tried once more
+    after a short wait: one bad moment of a rival's server must not turn into 'could not open'."""
+    p = _fetch(url, timeout)
+    for _ in range(retries):
+        if p["status"] and p["status"] < 500:
+            break
+        time.sleep(4)
+        p = _fetch(url, timeout)
+    return p
+
+
+def _fetch(url, timeout=20):
     if not url.startswith("http"):
         url = "https://" + url
     t0 = time.time()
@@ -114,26 +125,58 @@ def sitemap(domain, max_children=5):
     return {"found": False, "urls": 0, "oldest": "", "newest": "", "source": "", "note": "no sitemap"}
 
 
+SHOT_SIZES = (("desktop", 1366, 900, False), ("mobile", 390, 844, True))
+
+
 def screenshots(url, out_prefix):
-    """Desktop + mobile screenshots with Playwright, if installed. Returns list of file paths (maybe empty)."""
+    """Desktop + mobile screenshots of a page. Playwright when installed, else the Chrome/Edge/Chromium already on the
+    machine in headless mode, so the rival audit always SEES the pages. Returns list of file paths (maybe empty)."""
+    import os
+    import subprocess
+    from .config import S
+    url = url if url.startswith("http") else "https://" + url
+    paths = []
+    if S.shot_cmd:   # a real browser is the most faithful view, and the only one some rivals let in
+        path = f"{out_prefix}-desktop.png"
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            subprocess.run(S.shot_cmd.split() + [url, path], capture_output=True, timeout=90)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        if os.path.exists(path) and os.path.getsize(path) > 5000:
+            return [path]
     try:
         from playwright.sync_api import sync_playwright
-    except ImportError:
-        return []
-    paths = []
-    try:
         with sync_playwright() as p:
             b = p.chromium.launch()
-            for name, vp, mobile in (("desktop", {"width": 1366, "height": 900}, False), ("mobile", {"width": 390, "height": 844}, True)):
-                ctx = b.new_context(viewport=vp, is_mobile=mobile, user_agent=UA)
+            for name, w, h, mobile in SHOT_SIZES:
+                ctx = b.new_context(viewport={"width": w, "height": h}, is_mobile=mobile, user_agent=UA)
                 pg = ctx.new_page()
-                pg.goto(url if url.startswith("http") else "https://" + url, timeout=30000, wait_until="domcontentloaded")
+                pg.goto(url, timeout=30000, wait_until="domcontentloaded")
                 pg.wait_for_timeout(1500)
                 path = f"{out_prefix}-{name}.png"
                 pg.screenshot(path=path)
                 paths.append(path)
                 ctx.close()
             b.close()
-    except Exception:
         return paths
+    except Exception:
+        paths = []
+    from .pdf import find_browser
+    br = find_browser()
+    if not br:
+        return []
+    for name, w, h, _mobile in SHOT_SIZES:
+        path = f"{out_prefix}-{name}.png"
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            subprocess.run([br, "--headless=new", "--disable-gpu", "--no-first-run", "--hide-scrollbars", f"--user-agent={UA}",
+                            f"--window-size={w},{h}", "--virtual-time-budget=9000", f"--screenshot={path}", url],
+                           capture_output=True, timeout=60)
+        except (subprocess.TimeoutExpired, OSError):
+            continue
+        if os.path.exists(path) and os.path.getsize(path) > 5000:
+            paths.append(path)
     return paths

@@ -126,6 +126,11 @@ class Settings:
         return os.environ.get("VM_BROWSER_CMD", "").strip()
 
     @property
+    def shot_cmd(self):
+        """Optional command `<cmd> <url> <out.png>` that saves a screenshot from a real browser (rivals that block plain fetching and headless browsers)."""
+        return os.environ.get("VM_SHOT_CMD", "").strip()
+
+    @property
     def proof_min_usd(self):
         """A real business in the niche earning at least this much in 30 days proves the niche can pay, even when search is small."""
         return _f("VM_PROOF_MIN_USD", 5000)
