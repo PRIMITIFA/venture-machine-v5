@@ -17,6 +17,7 @@ EST = {
     "keywords_data/google_ads/search_volume/live": 0.08,
     "keywords_data/google_trends/explore/live": 0.01,
     "serp/google/organic/live/advanced": 0.006,
+    "serp/google/ai_mode/live/advanced": 0.01,
     "dataforseo_labs/google/keyword_suggestions/live": 0.02,
     "dataforseo_labs/google/bulk_keyword_difficulty/live": 0.03,
     "dataforseo_labs/google/bulk_traffic_estimation/live": 0.02,
@@ -304,6 +305,17 @@ def _aio_of(it):
                 walk(v)
     walk(it)
     return {"text": text[:2500], "refs": refs[:12], "loaded": bool(text)}
+
+
+def ai_mode(question, loc=2840, lang="en"):
+    """Ask Google's AI Mode one question (about $0.004). Returns {'text', 'refs': [{'domain', 'title'}]}; text '' when it gave no answer."""
+    res = post("serp/google/ai_mode/live/advanced", {"keyword": question[:700], "location_code": loc, "language_code": lang})
+    for it in ((res[0].get("items") or []) if res else []):
+        if it.get("type") == "ai_overview":
+            a = _aio_of(it)
+            a["text"] = re.sub(r"\[\[\d+\]\]|\u2060", "", a["text"])
+            return a
+    return {"text": "", "refs": [], "loaded": False}
 
 
 def _domains_in(obj):

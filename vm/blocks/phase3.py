@@ -183,6 +183,49 @@ Our data sources and their cost are in 'how'. Say if competitors sell cheaper th
     return Result("pass", summary)
 
 
+# ---------------- Ask Google's AI about each rival ----------------
+class RivalAi(BaseModel):
+    domain: str
+    revenue_month_usd_low: Optional[float] = Field(default=None, description="monthly revenue in USD the answer gives (low end); null if it gives none")
+    revenue_month_usd_high: Optional[float] = None
+    revenue_kind: Literal["published", "database estimate", "AI assumptions", "no figure"] = Field(description="published = the answer names a source that itself states this business's revenue (verified-revenue site, founder post, case study, filing, sale listing). database estimate = a company database range (ZoomInfo, Growjo...). AI assumptions = the AI multiplied its own guesses (visitors x conversion x price)")
+    revenue_source: str = Field(description="the named source, or the assumptions used, short")
+    customers: str = Field(description="customer or user count the answer gives with its source; '' if none")
+    prices: str = Field(description="prices the answer states; '' if none")
+    buyers_come_from: str = Field(description="where it says buyers come from; '' if not said")
+
+
+class RivalsAi(BaseModel):
+    rivals: list[RivalAi]
+
+
+def rivals_ai(c, comps, rival_traffic):
+    """What Google's AI Mode knows about each direct rival: revenue, customers, prices, channels. It is very accurate when a
+    figure is published somewhere and unreliable when it guesses (back-test 2026-11-28: looked-up figures within 16%, guesses
+    off 2x-12x), so every figure is labelled by where it came from and only 'published' may be read as proof."""
+    asked = []
+    for x in [x for x in comps if x.get("kind", "direct") == "direct"][:5]:
+        d = x["domain"]
+        v = num((rival_traffic.get(d) or {}).get("visits"))
+        q = (f"About the website {d}: 1) how much revenue does it make per month in USD, 2) how many customers or users does it have, "
+             f"3) what are its prices, 4) where do its buyers come from? "
+             + (f"A keyword tool estimates about {int(v):,} Google visits a month for it. " if v else "")
+             + "Name the source of every figure and say clearly which figures are your own assumption.")
+        try:
+            a = seo.ai_mode(q, c.loc, c.lang)
+        except (seo.DFSError, Exception) as ex:   # extra evidence: it must never break the run
+            a = {"text": "", "refs": [], "error": str(ex)[:120]}
+        if a.get("text"):
+            asked.append({"domain": d, "answer": a["text"][:2200], "sources_linked": [r["domain"] for r in a.get("refs") or []][:8]})
+    if not asked:
+        return []
+    out = ai.ask_json("Google's AI Mode was asked about each rival website below. For each, pull out what it said. Do not add anything "
+                      "that is not in the answer. Be strict about revenue_kind: a figure counts as 'published' only when a named source states that business's own revenue.",
+                      RivalsAi, smart=False, context=asked)
+    by = {a["domain"]: a for a in asked}
+    return [dict(r.model_dump(), sources_linked=by.get(r.domain, {}).get("sources_linked", []), answer=by.get(r.domain, {}).get("answer", "")[:900]) for r in out.rivals if r.domain in by]
+
+
 # ---------------- Google AI answers: what they say ----------------
 class AioOne(BaseModel):
     keyword: str
@@ -282,6 +325,10 @@ def b12_market(c):
         except seo.DFSError as ex:
             rival_traffic[x["domain"]] = {"error": str(ex)[:150]}
     history, trends = {}, []
+    try:
+        rival_ai = rivals_ai(c, comps, rival_traffic)
+    except Exception:
+        rival_ai = []
     by_visits = sorted([x for x in comps if x.get("kind", "direct") == "direct"], key=lambda x: -num((rival_traffic.get(x["domain"]) or {}).get("visits")))
     for x in by_visits[:K("history_rivals")]:
         try:
@@ -316,7 +363,8 @@ def b12_market(c):
 3) Buyer segments with real pain quotes (Trustpilot, app stores, Reddit, forums) and URLs; mark underserved ones.
 4) Countries/segments that are underserved; growth direction with evidence.{c.note()}""",
         Market, web=True, smart=True, context={"competitor_pricing": biz["competitors"], "search_volume_by_country_main_keywords": by_country,
-                                               "rivals_google_traffic_now_and_12m_trend": rival_traffic})
+                                               "rivals_google_traffic_now_and_12m_trend": rival_traffic,
+                                               "what_google_ai_says_about_rivals (only revenue_kind 'published' is evidence; the rest are guesses)": [{k: v for k, v in r.items() if k != "answer"} for r in rival_ai]})
     conv = S.assumed_conversion
     # niche clicks: what the top-5 results get from OUR buying keywords (volume x organic CTR of positions 1-5)
     kws = read_csv(c.path("08_keywords_clean.csv"))
@@ -340,7 +388,7 @@ def b12_market(c):
     d = {"bottom_up_usd_year": round(bottom_up),
          "buying_searches_month": int(bv), "clicks_month": round(clicks, 1), "ctr_top5": CTR_TOP5, "conversion_used": conv, "volume_split": volume_split(kws), "aio_share": round(aio_share, 2), "aio_click_factor": aio_factor, "aio_counts": aio["counts"],
          "price_used_usd": price, "price_source": price_src,
-         "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_traffic_history": history,
+         "competitor_domain_traffic": tr, "rival_traffic": rival_traffic, "rival_ai": rival_ai, "rival_traffic_history": history,
          "rivals_traffic_trend_12m_pct": rivals_trend,
          "search_volume_by_country": by_country, "min_market_usd": goal, **out.model_dump()}
     d["typical_price_usd"] = price

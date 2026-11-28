@@ -916,6 +916,19 @@ def build_html(slug):
             if young:
                 H.append("<p><b>Good sign:</b> %s %s on a web address less than 2 years old and already gets 100+ Google visits a month, so new sites can get in.</p>"
                          % (e(", ".join(r_["s"] for r_ in young)), "is" if len(young) == 1 else "are"))
+        rai_ = (mk or {}).get("rival_ai") or []
+        if rai_:
+            def rev_(r_):
+                lo_, hi_ = r_.get("revenue_month_usd_low"), r_.get("revenue_month_usd_high")
+                if not lo_ and not hi_:
+                    return "no figure"
+                return money(lo_ or hi_) if (not hi_ or not lo_ or hi_ == lo_) else "%s to %s" % (money(lo_), money(hi_))
+            kind_ = {"published": "published: counts as proof", "database estimate": "company database: rough", "AI assumptions": "AI guess: do not rely on it", "no figure": "-"}
+            H.append("<h3>What Google's AI says about each rival</h3><p class=small>Google's AI Mode was asked about each rival. In our back-test it was within 16% when the revenue was published somewhere, "
+                     "and off by 2 to 12 times when it had to guess, so each figure says where it came from.</p>" +
+                     table([{"s": r_["domain"], "r": rev_(r_), "k": kind_.get(r_.get("revenue_kind"), "-"), "b": (r_.get("revenue_source") or "-")[:160],
+                             "c": (r_.get("customers") or "-")[:90], "f": (r_.get("buyers_come_from") or "-")[:110]} for r_ in rai_],
+                           ["s", "r", "k", "b", "c", "f"], ["Rival", "Revenue a month", "How solid", "Based on", "Customers", "Buyers come from"]))
         if biz:
             H.append("<div class=gap><b>THE GAP YOU CAN OWN</b><br>%s</div>" % e(biz["identified_gap"]))
         if how:
